@@ -119,10 +119,10 @@ func (h *APIHandler) CreateAPI(c *gin.Context) {
 
 // GetAPI retrieves an API by UUID
 func (h *APIHandler) GetAPI(c *gin.Context) {
-	uuid := c.Param("api_uuid")
+	uuid := c.Param("apiId")
 	if uuid == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
-			"API UUID is required"))
+			"API ID is required"))
 		return
 	}
 
@@ -143,10 +143,10 @@ func (h *APIHandler) GetAPI(c *gin.Context) {
 
 // GetAPIsByProject retrieves all APIs for a project
 func (h *APIHandler) GetAPIsByProject(c *gin.Context) {
-	projectUUID := c.Param("project_uuid")
+	projectUUID := c.Param("projectId")
 	if projectUUID == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
-			"Project UUID is required"))
+			"Project ID is required"))
 		return
 	}
 
@@ -162,22 +162,24 @@ func (h *APIHandler) GetAPIsByProject(c *gin.Context) {
 		return
 	}
 
-	response := gin.H{
-		"apis": apis,
-		"pagination": gin.H{
-			"total": len(apis),
+	// Return constitution-compliant list response
+	c.JSON(http.StatusOK, dto.APIListResponse{
+		Count: len(apis),
+		List:  apis,
+		Pagination: dto.Pagination{
+			Total:  len(apis),
+			Offset: 0,
+			Limit:  len(apis),
 		},
-	}
-
-	c.JSON(http.StatusOK, response)
+	})
 }
 
 // UpdateAPI updates an existing API
 func (h *APIHandler) UpdateAPI(c *gin.Context) {
-	uuid := c.Param("api_uuid")
+	uuid := c.Param("apiId")
 	if uuid == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
-			"API UUID is required"))
+			"API ID is required"))
 		return
 	}
 
@@ -220,10 +222,10 @@ func (h *APIHandler) UpdateAPI(c *gin.Context) {
 
 // DeleteAPI deletes an API
 func (h *APIHandler) DeleteAPI(c *gin.Context) {
-	uuid := c.Param("api_uuid")
+	uuid := c.Param("apiId")
 	if uuid == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
-			"API UUID is required"))
+			"API ID is required"))
 		return
 	}
 
@@ -244,10 +246,10 @@ func (h *APIHandler) DeleteAPI(c *gin.Context) {
 
 // DeployAPIRevision deploys an API revision
 func (h *APIHandler) DeployAPIRevision(c *gin.Context) {
-	apiUUID := c.Param("api_uuid")
+	apiUUID := c.Param("apiId")
 	if apiUUID == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
-			"API UUID is required"))
+			"API ID is required"))
 		return
 	}
 
@@ -291,14 +293,14 @@ func (h *APIHandler) RegisterRoutes(r *gin.Engine) {
 	apiGroup := r.Group("/api/v1/apis")
 	{
 		apiGroup.POST("", h.CreateAPI)
-		apiGroup.GET("/:api_uuid", h.GetAPI)
-		apiGroup.PUT("/:api_uuid", h.UpdateAPI)
-		apiGroup.DELETE("/:api_uuid", h.DeleteAPI)
-		apiGroup.POST("/:api_uuid/deploy-revision", h.DeployAPIRevision)
+		apiGroup.GET("/:apiId", h.GetAPI)
+		apiGroup.PUT("/:apiId", h.UpdateAPI)
+		apiGroup.DELETE("/:apiId", h.DeleteAPI)
+		apiGroup.POST("/:apiId/deploy-revision", h.DeployAPIRevision)
 	}
 
 	// Project-specific API routes
-	projectAPIGroup := r.Group("/api/v1/projects/:project_uuid/apis")
+	projectAPIGroup := r.Group("/api/v1/projects/:projectId/apis")
 	{
 		projectAPIGroup.GET("", h.GetAPIsByProject)
 	}

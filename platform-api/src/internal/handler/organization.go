@@ -74,10 +74,10 @@ func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
 }
 
 func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
-	uuid := c.Param("org_uuid")
+	uuid := c.Param("orgId")
 	if uuid == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
-			"Organization UUID is required"))
+			"Organization ID is required"))
 		return
 	}
 
@@ -105,6 +105,6 @@ func (h *OrganizationHandler) RegisterRoutes(r *gin.Engine) {
 	orgGroup := r.Group("/api/v1/organizations")
 	{
 		orgGroup.POST("", h.CreateOrganization)
-		orgGroup.GET("/:org_uuid", h.GetOrganization)
+		orgGroup.GET("/:orgId", h.GetOrganization)
 	}
 }

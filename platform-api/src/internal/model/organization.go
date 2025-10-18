@@ -23,11 +23,11 @@ import (
 
 // Organization represents an organization entity in the API management platform
 type Organization struct {
-	UUID      string    `json:"uuid" db:"uuid"`
+	ID        string    `json:"id" db:"uuid"`
 	Handle    string    `json:"handle" db:"handle"`
 	Name      string    `json:"name" db:"name"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	CreatedAt time.Time `json:"createdAt" db:"created_at"`
+	UpdatedAt time.Time `json:"updatedAt" db:"updated_at"`
 }
 
 // TableName returns the table name for the Organization model

@@ -61,7 +61,7 @@ func (s *OrganizationService) CreateOrganization(handle string, name string) (*d
 
 	// CreateOrganization organization
 	org := &dto.Organization{
-		UUID:      uuid.New().String(),
+		ID:        uuid.New().String(),
 		Handle:    handle,
 		Name:      name,
 		CreatedAt: time.Now(),
@@ -76,9 +76,9 @@ func (s *OrganizationService) CreateOrganization(handle string, name string) (*d
 
 	// Create default project for the organization
 	defaultProject := &model.Project{
-		UUID:           uuid.New().String(),
+		ID:             uuid.New().String(),
 		Name:           "Default",
-		OrganizationID: org.UUID,
+		OrganizationID: org.ID,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 	}
@@ -121,7 +121,7 @@ func (s *OrganizationService) dtoToModel(dto *dto.Organization) *model.Organizat
 	}
 
 	return &model.Organization{
-		UUID:      dto.UUID,
+		ID:        dto.ID,
 		Handle:    dto.Handle,
 		Name:      dto.Name,
 		CreatedAt: dto.CreatedAt,
@@ -135,7 +135,7 @@ func (s *OrganizationService) modelToDTO(model *model.Organization) *dto.Organiz
 	}
 
 	return &dto.Organization{
-		UUID:      model.UUID,
+		ID:        model.ID,
 		Handle:    model.Handle,
 		Name:      model.Name,
 		CreatedAt: model.CreatedAt,
