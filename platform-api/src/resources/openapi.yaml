@@ -44,7 +44,7 @@ paths:
         '500':
             $ref: '#/components/responses/InternalServerError'
 
-  /organizations/{orgUuid}:
+  /organizations/{orgId}:
     get:
       summary: Get organization by UUID
       description: Retrieves a specific organization by its UUID
@@ -67,7 +67,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /organizations/{orgUuid}/projects:
+  /organizations/{orgId}/projects:
     get:
       summary: Get all projects for an organization
       description: Retrieves all projects belonging to a specific organization
@@ -117,7 +117,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /projects/{projectUuid}:
+  /projects/{projectId}:
     get:
       summary: Get project by UUID
       description: Retrieves a specific project by its UUID
@@ -218,7 +218,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /projects/{projectUuid}/apis:
+  /projects/{projectId}/apis:
     get:
       summary: Get all APIs for an project
       description: Retrieves all APIs belonging to a specific project
@@ -241,7 +241,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis/{apiUuid}:
+  /apis/{apiId}:
     get:
       summary: Get API by UUID
       description: Retrieves a specific API by its UUID
@@ -312,7 +312,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis/{apiUuid}/deploy-revision:
+  /apis/{apiId}/deploy-revision:
     post:
       tags:
         - API Revisions
@@ -418,7 +418,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /gateways/{gatewayUuid}:
+  /gateways/{gatewayId}:
     get:
       summary: Get gateway by UUID
       description: Retrieves a specific gateway by its UUID
@@ -426,7 +426,7 @@ paths:
       tags:
         - Gateways
       parameters:
-        - name: gatewayUuid
+        - name: gatewayId
           in: path
           required: true
           description: UUID of the gateway to retrieve
@@ -459,7 +459,7 @@ paths:
       tags:
         - Gateways
       parameters:
-        - name: gatewayUuid
+        - name: gatewayId
           in: path
           required: true
           description: UUID of the gateway to delete
@@ -481,7 +481,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /gateways/{gatewayUuid}/tokens:
+  /gateways/{gatewayId}/tokens:
     post:
       summary: Rotate gateway token
       description: Generates a new authentication token for the gateway. The existing token remains active to enable zero-downtime rotation.
@@ -489,7 +489,7 @@ paths:
       tags:
         - Gateway Tokens
       parameters:
-        - name: gatewayUuid
+        - name: gatewayId
           in: path
           required: true
           description: UUID of the gateway
@@ -519,7 +519,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /gateways/{gatewayUuid}/tokens/{tokenUuid}:
+  /gateways/{gatewayId}/tokens/{tokenId}:
     delete:
       summary: Revoke gateway token
       description: Revokes a specific gateway token. Operation is idempotent - revoking an already-revoked token succeeds.
@@ -527,7 +527,7 @@ paths:
       tags:
         - Gateway Tokens
       parameters:
-        - name: gatewayUuid
+        - name: gatewayId
           in: path
           required: true
           description: UUID of the gateway
@@ -535,7 +535,7 @@ paths:
             type: string
             format: uuid
             example: "987e6543-e21b-45d3-a789-426614174999"
-        - name: tokenUuid
+        - name: tokenId
           in: path
           required: true
           description: UUID of the token to revoke
@@ -572,7 +572,7 @@ components:
       required:
         - handle
       properties:
-        uuid:
+        id:
           type: string
           format: uuid
           description: Unique identifier for the organization
@@ -604,7 +604,7 @@ components:
         - name
         - organizationId
       properties:
-        uuid:
+        id:
           type: string
           description: Unique identifier for the project
           example: "yr434567-de34-76uj6-w376-234324532"
@@ -637,7 +637,7 @@ components:
         - version
       type: object
       properties:
-        uuid:
+        id:
           type: string
           description: Unique identifier for the api artifact
           readOnly: true
@@ -1278,7 +1278,7 @@ components:
     GatewayResponse:
       type: object
       properties:
-        uuid:
+        id:
           type: string
           format: uuid
           description: Unique identifier for the gateway
@@ -1342,6 +1342,26 @@ components:
               description: Maximum number of items returned per page
               example: 10
 
+    Pagination:
+      type: object
+      required:
+        - total
+        - offset
+        - limit
+      properties:
+        total:
+          type: integer
+          description: Total number of items available across all pages
+          example: 10
+        offset:
+          type: integer
+          description: Zero-based index of first item in current response
+          example: 0
+        limit:
+          type: integer
+          description: Maximum number of items returned per page
+          example: 10
+
     GatewayListResponse:
       type: object
       required:
@@ -1358,24 +1378,7 @@ components:
           items:
             $ref: '#/components/schemas/GatewayResponse'
         pagination:
-          type: object
-          required:
-            - total
-            - offset
-            - limit
-          properties:
-            total:
-              type: integer
-              description: Total number of items available across all pages
-              example: 10
-            offset:
-              type: integer
-              description: Zero-based index of first item in current response
-              example: 0
-            limit:
-              type: integer
-              description: Maximum number of items returned per page
-              example: 10
+          $ref: '#/components/schemas/Pagination'
 
     ProjectListResponse:
       type: object
@@ -1393,24 +1396,7 @@ components:
           items:
             $ref: '#/components/schemas/Project'
         pagination:
-          type: object
-          required:
-            - total
-            - offset
-            - limit
-          properties:
-            total:
-              type: integer
-              description: Total number of items available across all pages
-              example: 10
-            offset:
-              type: integer
-              description: Zero-based index of first item in current response
-              example: 0
-            limit:
-              type: integer
-              description: Maximum number of items returned per page
-              example: 10
+          $ref: '#/components/schemas/Pagination'
 
     APIListResponse:
       type: object
@@ -1428,24 +1414,7 @@ components:
           items:
             $ref: '#/components/schemas/API'
         pagination:
-          type: object
-          required:
-            - total
-            - offset
-            - limit
-          properties:
-            total:
-              type: integer
-              description: Total number of items available across all pages
-              example: 10
-            offset:
-              type: integer
-              description: Zero-based index of first item in current response
-              example: 0
-            limit:
-              type: integer
-              description: Maximum number of items returned per page
-              example: 10
+          $ref: '#/components/schemas/Pagination'
 
     TokenRotationResponse:
       type: object
@@ -1472,7 +1441,7 @@ components:
     TokenInfoResponse:
       type: object
       properties:
-        uuid:
+        id:
           type: string
           format: uuid
           description: Token UUID
@@ -1555,7 +1524,7 @@ components:
               administrator.
   parameters:
     OrganizationID:
-      name: orgUuid
+      name: orgId
       in: path
       required: true
       description: |
@@ -1566,7 +1535,7 @@ components:
         example: "123e4567-e89b-12d3-a456-426614174000"
 
     ProjectID:
-      name: projectUuid
+      name: projectId
       in: path
       required: true
       description: |
@@ -1577,7 +1546,7 @@ components:
         example: "yr434567-de34-76uj6-w376-234324532"
 
     apiID:
-      name: apiUuid
+      name: apiId
       in: path
       description: |
         **API ID** consisting of the **UUID** of the API.
