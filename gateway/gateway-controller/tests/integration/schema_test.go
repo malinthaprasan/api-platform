@@ -45,7 +45,7 @@ func TestDatabaseFileCreation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Create storage
-	db, err := storage.NewSQLiteStorage(dbPath, logger)
+	db, err := storage.NewStorage(storage.BackendConfig{Type: "sqlite", SQLitePath: dbPath}, logger)
 	require.NoError(t, err, "Failed to create SQLite storage")
 	defer db.Close()
 
@@ -89,7 +89,7 @@ func TestSchemaInitialization(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Create storage (should initialize schema)
-	db, err := storage.NewSQLiteStorage(dbPath, logger)
+	db, err := storage.NewStorage(storage.BackendConfig{Type: "sqlite", SQLitePath: dbPath}, logger)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -103,7 +103,7 @@ func TestSchemaInitialization(t *testing.T) {
 		var version int
 		err := rawDB.QueryRow("PRAGMA user_version").Scan(&version)
 		assert.NoError(t, err)
-		assert.Equal(t, 5, version, "Schema version should be 5")
+		assert.Equal(t, 9, version, "Schema version should be 9 (removed index_key from api_keys)")
 	})
 
 	// Verify deployments table exists
@@ -146,6 +146,7 @@ func TestSchemaInitialization(t *testing.T) {
 			"updated_at":       "TIMESTAMP",
 			"deployed_at":      "TIMESTAMP",
 			"deployed_version": "INTEGER",
+			"gateway_id":       "TEXT",
 		}
 
 		for colName, colType := range expectedColumns {
@@ -211,7 +212,6 @@ func TestSchemaInitialization(t *testing.T) {
 
 		// Expected indexes
 		expectedIndexes := []string{
-			"idx_name_version",
 			"idx_status",
 			"idx_context",
 			"idx_kind",
@@ -222,13 +222,13 @@ func TestSchemaInitialization(t *testing.T) {
 		}
 	})
 
-	// Verify UNIQUE constraint on (name, version)
+	// Verify UNIQUE constraint on (name, version, gateway_id)
 	t.Run("UniqueConstraint", func(t *testing.T) {
 		var sql string
 		err := rawDB.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='deployments'").Scan(&sql)
 		require.NoError(t, err)
 
-		assert.Contains(t, sql, "UNIQUE(display_name, version)", "Should have UNIQUE constraint on (display_name, version)")
+		assert.Contains(t, sql, "UNIQUE(display_name, version, gateway_id)", "Should have UNIQUE constraint on (display_name, version, gateway_id)")
 	})
 
 	// Verify CHECK constraint on status
@@ -237,7 +237,7 @@ func TestSchemaInitialization(t *testing.T) {
 		err := rawDB.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='deployments'").Scan(&sql)
 		require.NoError(t, err)
 
-		assert.Contains(t, sql, "CHECK(status IN ('pending', 'deployed', 'failed'))", "Should have CHECK constraint on status")
+		assert.Contains(t, sql, "CHECK(status IN ('pending', 'deployed', 'failed', 'undeployed'))", "Should have CHECK constraint on status")
 	})
 
 	// Verify WAL mode is enabled
@@ -272,7 +272,7 @@ func TestSchemaInitializationIdempotent(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// First initialization
-	db1, err := storage.NewSQLiteStorage(dbPath, logger)
+	db1, err := storage.NewStorage(storage.BackendConfig{Type: "sqlite", SQLitePath: dbPath}, logger)
 	require.NoError(t, err)
 
 	// Add a configuration
@@ -282,7 +282,7 @@ func TestSchemaInitializationIdempotent(t *testing.T) {
 	db1.Close()
 
 	// Second initialization (should not recreate schema or lose data)
-	db2, err := storage.NewSQLiteStorage(dbPath, logger)
+	db2, err := storage.NewStorage(storage.BackendConfig{Type: "sqlite", SQLitePath: dbPath}, logger)
 	require.NoError(t, err)
 	defer db2.Close()
 
@@ -310,7 +310,7 @@ func TestEmptyDatabaseInitialization(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Create storage (should auto-create database and schema)
-	db, err := storage.NewSQLiteStorage(dbPath, logger)
+	db, err := storage.NewStorage(storage.BackendConfig{Type: "sqlite", SQLitePath: dbPath}, logger)
 	assert.NoError(t, err, "Should successfully create database from scratch")
 	defer db.Close()
 
@@ -340,7 +340,7 @@ func TestDatabaseIntegrityCheck(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	db, err := storage.NewSQLiteStorage(dbPath, logger)
+	db, err := storage.NewStorage(storage.BackendConfig{Type: "sqlite", SQLitePath: dbPath}, logger)
 	require.NoError(t, err)
 
 	// Add multiple configurations

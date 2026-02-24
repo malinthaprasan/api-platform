@@ -1,0 +1,509 @@
+/*
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+package buildfile
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/wso2/api-platform/gateway/gateway-builder/internal/testutils"
+	"github.com/wso2/api-platform/gateway/gateway-builder/pkg/types"
+)
+
+func TestCreateBuildInfo_EmptyPolicies(t *testing.T) {
+	policies := []*types.DiscoveredPolicy{}
+
+	info := CreateBuildInfo("v1.0.0", policies, "/output")
+
+	assert.Equal(t, "v1.0.0", info.BuilderVersion)
+	assert.Equal(t, "/output", info.OutputDir)
+	assert.Empty(t, info.Policies)
+	assert.NotEmpty(t, info.BuildTimestamp)
+}
+
+func TestCreateBuildInfo_SinglePolicy(t *testing.T) {
+	policies := []*types.DiscoveredPolicy{
+		{
+			Name:    "ratelimit",
+			Version: "v1.0.0",
+			Path:    "/policies/ratelimit",
+		},
+	}
+
+	info := CreateBuildInfo("v2.0.0", policies, "/build/output")
+
+	assert.Equal(t, "v2.0.0", info.BuilderVersion)
+	assert.Equal(t, "/build/output", info.OutputDir)
+	assert.Len(t, info.Policies, 1)
+	assert.Equal(t, "ratelimit", info.Policies[0].Name)
+	assert.Equal(t, "v1.0.0", info.Policies[0].Version)
+}
+
+func TestCreateBuildInfo_MultiplePolicies(t *testing.T) {
+	policies := []*types.DiscoveredPolicy{
+		{Name: "ratelimit", Version: "v1.0.0"},
+		{Name: "jwt-auth", Version: "v0.1.0"},
+		{Name: "cors", Version: "v2.0.0"},
+	}
+
+	info := CreateBuildInfo("v1.5.0", policies, "/out")
+
+	assert.Len(t, info.Policies, 3)
+	assert.Equal(t, "ratelimit", info.Policies[0].Name)
+	assert.Equal(t, "jwt-auth", info.Policies[1].Name)
+	assert.Equal(t, "cors", info.Policies[2].Name)
+}
+
+func TestBuildInfo_ToJSON_EmptyPolicies(t *testing.T) {
+	info := &BuildInfo{
+		BuildTimestamp:  "2025-01-01T00:00:00Z",
+		BuilderVersion: "v1.0.0",
+		OutputDir:      "/output",
+		Policies:       []PolicyInfo{},
+	}
+
+	jsonStr, err := info.ToJSON()
+	require.NoError(t, err)
+	assert.Contains(t, jsonStr, `"builderVersion": "v1.0.0"`)
+	assert.Contains(t, jsonStr, `"outputDir": "/output"`)
+	assert.Contains(t, jsonStr, `"policies": []`)
+}
+
+func TestBuildInfo_ToJSON_WithPolicies(t *testing.T) {
+	info := &BuildInfo{
+		BuildTimestamp:  "2025-01-01T00:00:00Z",
+		BuilderVersion: "v1.0.0",
+		OutputDir:      "/output",
+		Policies: []PolicyInfo{
+			{Name: "ratelimit", Version: "v1.0.0"},
+			{Name: "jwt-auth", Version: "v0.1.0"},
+		},
+	}
+
+	jsonStr, err := info.ToJSON()
+	require.NoError(t, err)
+
+	// Verify it's valid JSON
+	var parsed map[string]any
+	err = json.Unmarshal([]byte(jsonStr), &parsed)
+	require.NoError(t, err)
+
+	assert.Equal(t, "v1.0.0", parsed["builderVersion"])
+	policies := parsed["policies"].([]any)
+	assert.Len(t, policies, 2)
+}
+
+func TestBuildInfo_WriteToFile_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "build-info.json")
+
+	info := &BuildInfo{
+		BuildTimestamp:  "2025-01-01T00:00:00Z",
+		BuilderVersion: "v1.0.0",
+		OutputDir:      "/output",
+		Policies: []PolicyInfo{
+			{Name: "test-policy", Version: "v1.0.0"},
+		},
+	}
+
+	err := info.WriteToFile(filePath)
+	require.NoError(t, err)
+
+	// Verify file exists and contains expected content
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "test-policy")
+	assert.Contains(t, string(content), "v1.0.0")
+}
+
+func TestBuildInfo_WriteToFile_DirectoryNotExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "nonexistent-dir", "build-info.json")
+
+	info := &BuildInfo{
+		BuildTimestamp:  "2025-01-01T00:00:00Z",
+		BuilderVersion: "v1.0.0",
+		OutputDir:      "/output",
+		Policies:       []PolicyInfo{},
+	}
+
+	err := info.WriteToFile(filePath)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write build info file")
+}
+
+func TestWriteBuildLockWithVersions_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies:
+  - name: ratelimit
+    filePath: ./policies/ratelimit
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	policyDir := filepath.Join(tmpDir, "policies", "ratelimit")
+	testutils.CreateDir(t, policyDir)
+
+	discovered := []*types.DiscoveredPolicy{
+		{
+			Name:    "ratelimit",
+			Version: "v1.0.0",
+			Path:    policyDir,
+		},
+	}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	require.NoError(t, err)
+
+	lockPath := filepath.Join(tmpDir, "build-lock.yaml")
+	content, err := os.ReadFile(lockPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "ratelimit")
+	assert.Contains(t, string(content), "v1.0.0")
+}
+
+func TestWriteBuildLockWithVersions_FileNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	buildFilePath := filepath.Join(tmpDir, "nonexistent.yaml")
+
+	discovered := []*types.DiscoveredPolicy{}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read build file")
+}
+
+func TestWriteBuildLockWithVersions_EmptyBuildFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies: []
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	discovered := []*types.DiscoveredPolicy{}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	require.NoError(t, err)
+
+	lockPath := filepath.Join(tmpDir, "build-lock.yaml")
+	_, err = os.Stat(lockPath)
+	assert.NoError(t, err)
+}
+
+func TestWriteBuildLockWithVersions_PolicyNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies:
+  - name: unknown-policy
+    filePath: ./policies/unknown
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	discovered := []*types.DiscoveredPolicy{}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to determine version for policy")
+}
+
+func TestWriteBuildLockWithVersions_MultiplePolicies(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies:
+  - name: ratelimit
+    filePath: ./policies/ratelimit
+  - name: jwt-auth
+    filePath: ./policies/jwt-auth
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	ratelimitDir := filepath.Join(tmpDir, "policies", "ratelimit")
+	jwtAuthDir := filepath.Join(tmpDir, "policies", "jwt-auth")
+	testutils.CreateDir(t, ratelimitDir)
+	testutils.CreateDir(t, jwtAuthDir)
+
+	discovered := []*types.DiscoveredPolicy{
+		{Name: "ratelimit", Version: "v1.0.0", Path: ratelimitDir},
+		{Name: "jwt-auth", Version: "v0.1.0", Path: jwtAuthDir},
+	}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	require.NoError(t, err)
+
+	lockPath := filepath.Join(tmpDir, "build-lock.yaml")
+	content, err := os.ReadFile(lockPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "ratelimit")
+	assert.Contains(t, string(content), "jwt-auth")
+	assert.Contains(t, string(content), "v1.0.0")
+	assert.Contains(t, string(content), "v0.1.0")
+}
+
+func TestWriteBuildLockWithVersions_MultipleCandidatesWithFilePath(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies:
+  - name: ratelimit
+    filePath: ./policies/ratelimit-v2
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	v1Dir := filepath.Join(tmpDir, "policies", "ratelimit-v1")
+	v2Dir := filepath.Join(tmpDir, "policies", "ratelimit-v2")
+	testutils.CreateDir(t, v1Dir)
+	testutils.CreateDir(t, v2Dir)
+
+	discovered := []*types.DiscoveredPolicy{
+		{Name: "ratelimit", Version: "v1.0.0", Path: v1Dir},
+		{Name: "ratelimit", Version: "v2.0.0", Path: v2Dir},
+	}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	require.NoError(t, err)
+
+	lockPath := filepath.Join(tmpDir, "build-lock.yaml")
+	content, err := os.ReadFile(lockPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "v2.0.0")
+	assert.NotContains(t, string(content), "v1.0.0")
+}
+
+func TestWriteBuildLockWithVersions_GomoduleWithVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies:
+  - name: ratelimit
+    gomodule: github.com/example/ratelimit@v1.0.0
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	policyDir := filepath.Join(tmpDir, "policies", "ratelimit")
+	testutils.CreateDir(t, policyDir)
+
+	goModPath := filepath.Join(policyDir, "go.mod")
+	testutils.WriteGoMod(t, policyDir, "github.com/example/ratelimit")
+
+	discovered := []*types.DiscoveredPolicy{
+		{
+			Name:      "ratelimit",
+			Version:   "v1.0.0",
+			Path:      policyDir,
+			GoModPath: goModPath,
+		},
+	}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	require.NoError(t, err)
+
+	lockPath := filepath.Join(tmpDir, "build-lock.yaml")
+	content, err := os.ReadFile(lockPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "ratelimit")
+	assert.Contains(t, string(content), "v1.0.0")
+}
+
+func TestWriteBuildLockWithVersions_GomoduleWithoutVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies:
+  - name: ratelimit
+    gomodule: github.com/example/ratelimit
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	policyDir := filepath.Join(tmpDir, "policies", "ratelimit")
+	testutils.CreateDir(t, policyDir)
+
+	goModPath := filepath.Join(policyDir, "go.mod")
+	testutils.WriteGoMod(t, policyDir, "github.com/example/ratelimit")
+
+	discovered := []*types.DiscoveredPolicy{
+		{
+			Name:      "ratelimit",
+			Version:   "v2.0.0",
+			Path:      policyDir,
+			GoModPath: goModPath,
+		},
+	}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	require.NoError(t, err)
+
+	lockPath := filepath.Join(tmpDir, "build-lock.yaml")
+	content, err := os.ReadFile(lockPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "v2.0.0")
+}
+
+func TestWriteBuildLockWithVersions_GomoduleNoMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies:
+  - name: ratelimit
+    gomodule: github.com/example/ratelimit@v1.0.0
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	discovered := []*types.DiscoveredPolicy{}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to determine version for policy")
+}
+
+func TestWriteBuildLockWithVersions_GomoduleMultipleCandidates(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies:
+  - name: ratelimit
+    gomodule: github.com/example/ratelimit@v2.0.0
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	v1Dir := filepath.Join(tmpDir, "policies", "ratelimit-v1")
+	v2Dir := filepath.Join(tmpDir, "policies", "ratelimit-v2")
+	testutils.CreateDir(t, v1Dir)
+	testutils.CreateDir(t, v2Dir)
+
+	v1GoModPath := filepath.Join(v1Dir, "go.mod")
+	v2GoModPath := filepath.Join(v2Dir, "go.mod")
+	testutils.WriteGoMod(t, v1Dir, "github.com/example/ratelimit")
+	testutils.WriteGoMod(t, v2Dir, "github.com/example/ratelimit")
+
+	discovered := []*types.DiscoveredPolicy{
+		{Name: "ratelimit", Version: "v1.0.0", Path: v1Dir, GoModPath: v1GoModPath},
+		{Name: "ratelimit", Version: "v2.0.0", Path: v2Dir, GoModPath: v2GoModPath},
+	}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	require.NoError(t, err)
+
+	lockPath := filepath.Join(tmpDir, "build-lock.yaml")
+	content, err := os.ReadFile(lockPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "v2.0.0")
+}
+
+func TestWriteBuildLockWithVersions_GomoduleVersionNormalization(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFileContent := `version: "1.0"
+policies:
+  - name: ratelimit
+    gomodule: github.com/example/ratelimit@1.0.0
+`
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, buildFileContent)
+
+	policyDir := filepath.Join(tmpDir, "policies", "ratelimit")
+	testutils.CreateDir(t, policyDir)
+
+	goModPath := filepath.Join(policyDir, "go.mod")
+	testutils.WriteGoMod(t, policyDir, "github.com/example/ratelimit")
+
+	// Discovered version has 'v' prefix
+	discovered := []*types.DiscoveredPolicy{
+		{
+			Name:      "ratelimit",
+			Version:   "v1.0.0", // Has 'v' prefix
+			Path:      policyDir,
+			GoModPath: goModPath,
+		},
+	}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	require.NoError(t, err)
+
+	lockPath := filepath.Join(tmpDir, "build-lock.yaml")
+	content, err := os.ReadFile(lockPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "v1.0.0")
+}
+
+func TestWriteBuildLockWithVersions_InvalidBuildFileYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	buildFilePath := filepath.Join(tmpDir, "build.yaml")
+	testutils.WriteFile(t, buildFilePath, "invalid: yaml: content: -")
+
+	discovered := []*types.DiscoveredPolicy{}
+
+	err := WriteBuildLockWithVersions(buildFilePath, discovered)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse build file YAML")
+}
+
+func TestBuildInfo_WriteToFile_InvalidPath(t *testing.T) {
+	info := &BuildInfo{
+		BuildTimestamp:  "2025-01-01T00:00:00Z",
+		BuilderVersion: "v1.0.0",
+		OutputDir:      "/output",
+		Policies:       []PolicyInfo{},
+	}
+
+	err := info.WriteToFile("/nonexistent/directory/build-info.json")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write build info file")
+}
+
+func TestBuildInfo_ToJSON_Success(t *testing.T) {
+	info := &BuildInfo{
+		BuildTimestamp:  "2025-01-01T00:00:00Z",
+		BuilderVersion: "v2.0.0",
+		OutputDir:      "/output/dir",
+		Policies: []PolicyInfo{
+			{Name: "test", Version: "v1.0.0"},
+		},
+	}
+
+	jsonStr, err := info.ToJSON()
+	require.NoError(t, err)
+	assert.Contains(t, jsonStr, "v2.0.0")
+	assert.Contains(t, jsonStr, "test")
+	assert.Contains(t, jsonStr, "v1.0.0")
+
+	// Verify it's valid JSON
+	var parsed BuildInfo
+	err = json.Unmarshal([]byte(jsonStr), &parsed)
+	require.NoError(t, err)
+	assert.Equal(t, info.BuilderVersion, parsed.BuilderVersion)
+}

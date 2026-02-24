@@ -18,7 +18,10 @@
 package repository
 
 import (
+	"database/sql"
+
 	"platform-api/src/internal/model"
+	"time"
 )
 
 // OrganizationRepository defines the interface for organization data access
@@ -43,28 +46,26 @@ type ProjectRepository interface {
 	ListProjects(orgID string, limit, offset int) ([]*model.Project, error)
 }
 
+type ArtifactRepository interface {
+	Create(tx *sql.Tx, artifact *model.Artifact) error
+	Delete(tx *sql.Tx, uuid string) error
+	Update(tx *sql.Tx, artifact *model.Artifact) error
+	Exists(kind, handle, orgUUID string) (bool, error)
+	GetByHandle(handle, orgUUID string) (*model.Artifact, error)
+	CountByKindAndOrg(kind, orgUUID string) (int, error)
+}
+
 // APIRepository defines the interface for API data operations
 type APIRepository interface {
 	CreateAPI(api *model.API) error
 	GetAPIByUUID(apiUUID, orgUUID string) (*model.API, error)
 	GetAPIMetadataByHandle(handle, orgUUID string) (*model.APIMetadata, error)
 	GetAPIsByProjectUUID(projectUUID, orgUUID string) ([]*model.API, error)
-	GetAPIsByOrganizationUUID(orgUUID string, projectUUID *string) ([]*model.API, error)
+	GetAPIsByOrganizationUUID(orgUUID string, projectUUID string) ([]*model.API, error)
 	GetAPIsByGatewayUUID(gatewayUUID, orgUUID string) ([]*model.API, error)
 	GetDeployedAPIsByGatewayUUID(gatewayUUID, orgUUID string) ([]*model.API, error)
 	UpdateAPI(api *model.API) error
 	DeleteAPI(apiUUID, orgUUID string) error
-
-	// Deployment artifact methods (immutable deployments)
-	CreateDeployment(deployment *model.APIDeployment) error
-	GetDeploymentByID(deploymentID, apiUUID, orgUUID string) (*model.APIDeployment, error)
-	GetDeploymentsByAPIUUID(apiUUID, orgUUID string, gatewayID *string, status *string) ([]*model.APIDeployment, error)
-	GetDeploymentContent(deploymentID, apiUUID, orgUUID string) ([]byte, error)
-	UpdateDeploymentStatus(deploymentID, apiUUID, status, orgUUID string) error
-	DeleteDeployment(deploymentID, apiUUID, orgUUID string) error
-	GetActiveDeploymentByGateway(apiUUID, gatewayID, orgUUID string) (*model.APIDeployment, error)
-	CountDeploymentsByAPIAndGateway(apiUUID, gatewayID, orgUUID string) (int, error)
-	GetOldestUndeployedDeploymentByGateway(apiUUID, gatewayID, orgUUID string) (*model.APIDeployment, error)
 
 	// API-Gateway association methods
 	GetAPIGatewaysWithDetails(apiUUID, orgUUID string) ([]*model.APIGatewayWithDetails, error)
@@ -79,20 +80,20 @@ type APIRepository interface {
 	CheckAPIExistsByNameAndVersionInOrganization(name, version, orgUUID, excludeHandle string) (bool, error)
 }
 
-// BackendServiceRepository defines the interface for backend service data operations
-type BackendServiceRepository interface {
-	CreateBackendService(service *model.BackendService) error
-	GetBackendServiceByUUID(serviceId string) (*model.BackendService, error)
-	GetBackendServicesByOrganizationID(orgID string) ([]*model.BackendService, error)
-	GetBackendServiceByNameAndOrgID(name, orgID string) (*model.BackendService, error)
-	UpdateBackendService(service *model.BackendService) error
-	DeleteBackendService(serviceId string) error
+// DeploymentRepository defines the interface for deployment data operations
+type DeploymentRepository interface {
+	// Deployment artifact methods (immutable deployments)
+	CreateWithLimitEnforcement(deployment *model.Deployment, hardLimit int) error // Atomic: count, cleanup if needed, create
+	GetWithContent(deploymentID, artifactUUID, orgUUID string) (*model.Deployment, error)
+	GetWithState(deploymentID, artifactUUID, orgUUID string) (*model.Deployment, error)
+	GetDeploymentsWithState(artifactUUID, orgUUID string, gatewayID *string, status *string, maxPerAPIGW int) ([]*model.Deployment, error)
+	Delete(deploymentID, artifactUUID, orgUUID string) error
+	GetCurrentByGateway(artifactUUID, gatewayID, orgUUID string) (*model.Deployment, error)
 
-	// API-Backend Service associations
-	AssociateBackendServiceWithAPI(apiId, backendServiceId string, isDefault bool) error
-	DisassociateBackendServiceFromAPI(apiId, backendServiceId string) error
-	GetBackendServicesByAPIID(apiId string) ([]*model.BackendService, error)
-	GetAPIsByBackendServiceID(backendServiceId string) ([]string, error)
+	// Deployment status methods (mutable state tracking)
+	SetCurrent(artifactUUID, orgUUID, gatewayID, deploymentID string, status model.DeploymentStatus) (updatedAt time.Time, err error)
+	GetStatus(artifactUUID, orgUUID, gatewayID string) (deploymentID string, status model.DeploymentStatus, updatedAt *time.Time, err error)
+	DeleteStatus(artifactUUID, orgUUID, gatewayID string) error
 }
 
 // GatewayRepository defines the interface for gateway data access
@@ -108,13 +109,14 @@ type GatewayRepository interface {
 	UpdateActiveStatus(gatewayId string, isActive bool) error
 
 	// Gateway association checking operations
-	HasGatewayAPIDeployments(gatewayID, organizationID string) (bool, error)
-	HasGatewayAPIAssociations(gatewayID, organizationID string) (bool, error)
+	HasGatewayDeployments(gatewayID, organizationID string) (bool, error)
 	HasGatewayAssociations(gatewayID, organizationID string) (bool, error)
+	HasGatewayAssociationsOrDeployments(gatewayID, organizationID string) (bool, error)
 
 	// Token operations
 	CreateToken(token *model.GatewayToken) error
 	GetActiveTokensByGatewayUUID(gatewayId string) ([]*model.GatewayToken, error)
+	GetActiveTokenByHash(tokenHash string) (*model.GatewayToken, error)
 	GetTokenByUUID(tokenId string) (*model.GatewayToken, error)
 	RevokeToken(tokenId string) error
 	CountActiveTokens(gatewayId string) (int, error)
@@ -146,4 +148,42 @@ type APIPublicationRepository interface {
 	Delete(apiUUID, devPortalUUID, orgUUID string) error
 	UpsertPublication(publication *model.APIPublication) error
 	GetAPIDevPortalsWithDetails(apiUUID, orgUUID string) ([]*model.APIDevPortalWithDetails, error)
+}
+
+// LLMProviderTemplateRepository defines the interface for LLM provider template persistence
+type LLMProviderTemplateRepository interface {
+	Create(t *model.LLMProviderTemplate) error
+	GetByID(templateID, orgUUID string) (*model.LLMProviderTemplate, error)
+	GetByUUID(uuid, orgUUID string) (*model.LLMProviderTemplate, error)
+	List(orgUUID string, limit, offset int) ([]*model.LLMProviderTemplate, error)
+	Count(orgUUID string) (int, error)
+	Update(t *model.LLMProviderTemplate) error
+	Delete(templateID, orgUUID string) error
+	Exists(templateID, orgUUID string) (bool, error)
+}
+
+// LLMProviderRepository defines the interface for LLM provider persistence
+type LLMProviderRepository interface {
+	Create(p *model.LLMProvider) error
+	GetByID(providerID, orgUUID string) (*model.LLMProvider, error)
+	List(orgUUID string, limit, offset int) ([]*model.LLMProvider, error)
+	Count(orgUUID string) (int, error)
+	Update(p *model.LLMProvider) error
+	Delete(providerID, orgUUID string) error
+	Exists(providerID, orgUUID string) (bool, error)
+}
+
+// LLMProxyRepository defines the interface for LLM proxy persistence
+type LLMProxyRepository interface {
+	Create(p *model.LLMProxy) error
+	GetByID(proxyID, orgUUID string) (*model.LLMProxy, error)
+	List(orgUUID string, limit, offset int) ([]*model.LLMProxy, error)
+	ListByProject(orgUUID, projectUUID string, limit, offset int) ([]*model.LLMProxy, error)
+	ListByProvider(orgUUID, providerID string, limit, offset int) ([]*model.LLMProxy, error)
+	Count(orgUUID string) (int, error)
+	CountByProject(orgUUID, projectUUID string) (int, error)
+	CountByProvider(orgUUID, providerID string) (int, error)
+	Update(p *model.LLMProxy) error
+	Delete(proxyID, orgUUID string) error
+	Exists(proxyID, orgUUID string) (bool, error)
 }

@@ -20,9 +20,11 @@ package service
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
+	"net/url"
 	"time"
 
+	"platform-api/src/api"
 	"platform-api/src/config"
 	"platform-api/src/internal/constants"
 	"platform-api/src/internal/dto"
@@ -31,52 +33,64 @@ import (
 	"platform-api/src/internal/utils"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 // DeploymentService handles business logic for API deployment operations
 type DeploymentService struct {
 	apiRepo              repository.APIRepository
+	artifactRepo         repository.ArtifactRepository
+	deploymentRepo       repository.DeploymentRepository
 	gatewayRepo          repository.GatewayRepository
-	backendServiceRepo   repository.BackendServiceRepository
 	orgRepo              repository.OrganizationRepository
 	gatewayEventsService *GatewayEventsService
 	apiUtil              *utils.APIUtil
 	cfg                  *config.Server
+	slogger              *slog.Logger
 }
 
 // NewDeploymentService creates a new deployment service
 func NewDeploymentService(
 	apiRepo repository.APIRepository,
+	artifactRepo repository.ArtifactRepository,
+	deploymentRepo repository.DeploymentRepository,
 	gatewayRepo repository.GatewayRepository,
-	backendServiceRepo repository.BackendServiceRepository,
 	orgRepo repository.OrganizationRepository,
 	gatewayEventsService *GatewayEventsService,
 	apiUtil *utils.APIUtil,
 	cfg *config.Server,
+	slogger *slog.Logger,
 ) *DeploymentService {
 	return &DeploymentService{
 		apiRepo:              apiRepo,
+		artifactRepo:         artifactRepo,
+		deploymentRepo:       deploymentRepo,
 		gatewayRepo:          gatewayRepo,
-		backendServiceRepo:   backendServiceRepo,
 		orgRepo:              orgRepo,
 		gatewayEventsService: gatewayEventsService,
 		apiUtil:              apiUtil,
 		cfg:                  cfg,
+		slogger:              slogger,
 	}
 }
 
 // DeployAPI creates a new immutable deployment artifact and deploys it to a gateway
-func (s *DeploymentService) DeployAPI(apiUUID string, req *dto.DeployAPIRequest, orgUUID string) (*dto.DeploymentResponse, error) {
+func (s *DeploymentService) DeployAPI(apiUUID string, req *api.DeployRequest, orgUUID string) (*api.DeploymentResponse, error) {
 	// Validate request
+	if req == nil {
+		return nil, constants.ErrInvalidInput
+	}
 	if req.Base == "" {
-		return nil, errors.New("base is required")
+		return nil, constants.ErrDeploymentBaseRequired
 	}
-	if req.GatewayID == "" {
-		return nil, errors.New("gatewayId is required")
+	gatewayID := utils.OpenAPIUUIDToString(req.GatewayId)
+	if gatewayID == "" {
+		return nil, constants.ErrDeploymentGatewayIDRequired
 	}
+	metadata := utils.MapValueOrEmpty(req.Metadata)
 
 	// Validate gateway exists and belongs to organization
-	gateway, err := s.gatewayRepo.GetByUUID(req.GatewayID)
+	gateway, err := s.gatewayRepo.GetByUUID(gatewayID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get gateway: %w", err)
 	}
@@ -93,59 +107,18 @@ func (s *DeploymentService) DeployAPI(apiUUID string, req *dto.DeployAPIRequest,
 		return nil, constants.ErrAPINotFound
 	}
 
-	// Validate API has backend services attached (do this early before deployment limits)
-	backendServices, err := s.backendServiceRepo.GetBackendServicesByAPIID(apiUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get backend services: %w", err)
-	}
-	if apiModel.Type != constants.APITypeWebSub && len(backendServices) == 0 {
-		return nil, errors.New("API must have at least one backend service attached before deployment")
-	}
-
-	// Check if there's an existing active deployment on this gateway
-	existingDeployment, err := s.apiRepo.GetActiveDeploymentByGateway(apiUUID, req.GatewayID, orgUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check existing deployments: %w", err)
-	}
-
-	// If exists, mark it as UNDEPLOYED (but don't send undeployment event yet)
-	// TODO:// The gateway will receive the new deployment event and handle the transition
-	if existingDeployment != nil {
-		if err := s.apiRepo.UpdateDeploymentStatus(existingDeployment.DeploymentID, apiUUID, string(model.DeploymentStatusUndeployed), orgUUID); err != nil {
-			return nil, fmt.Errorf("failed to undeploy existing deployment %s: %w", existingDeployment.DeploymentID, err)
-		}
-	}
-	// TODO:// Transaction handling for deployment creation and existing deployment update
-	// Check deployment limits
-	apiDeploymentCount, err := s.apiRepo.CountDeploymentsByAPIAndGateway(apiUUID, req.GatewayID, orgUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check deployment count: %w", err)
-	}
-	if apiDeploymentCount >= s.cfg.Deployments.MaxPerAPIGateway {
-		// Delete oldest deployment in UNDEPLOYED state to make room
-		oldestDeployment, err := s.apiRepo.GetOldestUndeployedDeploymentByGateway(apiUUID, req.GatewayID, orgUUID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get oldest undeployed deployment: %w", err)
-		}
-		if oldestDeployment != nil {
-			if err := s.apiRepo.DeleteDeployment(oldestDeployment.DeploymentID, apiUUID, orgUUID); err != nil {
-				return nil, fmt.Errorf("failed to delete oldest undeployed deployment: %w", err)
-			}
-			log.Printf("[INFO] Deleted oldest undeployed deployment %s to make room for new deployment", oldestDeployment.DeploymentID)
-		}
+	// Validate deployment name is provided
+	if req.Name == "" {
+		return nil, constants.ErrDeploymentNameRequired
 	}
 
 	var baseDeploymentID *string
-	var apiContent *dto.API
 	var contentBytes []byte
 
 	// Determine the source: "current" or existing deployment
 	if req.Base == "current" {
-		// Use current API state
-		apiContent = s.apiUtil.ModelToDTO(apiModel)
-
-		// Generate API deployment YAML for storage
-		apiYaml, err := s.apiUtil.GenerateAPIDeploymentYAML(apiContent)
+		// Generate API deployment YAML for storage using the model directly
+		apiYaml, err := s.apiUtil.GenerateAPIDeploymentYAML(apiModel)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate API deployment YAML: %w", err)
 		}
@@ -154,7 +127,7 @@ func (s *DeploymentService) DeployAPI(apiUUID string, req *dto.DeployAPIRequest,
 		contentBytes = []byte(apiYaml)
 	} else {
 		// Use existing deployment as base
-		baseDeployment, err := s.apiRepo.GetDeploymentByID(req.Base, apiUUID, orgUUID)
+		baseDeployment, err := s.deploymentRepo.GetWithContent(req.Base, apiUUID, orgUUID)
 		if err != nil {
 			if errors.Is(err, constants.ErrDeploymentNotFound) {
 				return nil, constants.ErrBaseDeploymentNotFound
@@ -170,135 +143,166 @@ func (s *DeploymentService) DeployAPI(apiUUID string, req *dto.DeployAPIRequest,
 	// Generate deployment ID
 	deploymentID := uuid.New().String()
 
-	// Create new deployment record
-	deployment := &model.APIDeployment{
-		DeploymentID:     deploymentID,
-		ApiID:            apiUUID,
-		OrganizationID:   orgUUID,
-		GatewayID:        req.GatewayID,
-		Status:           model.DeploymentStatusDeployed,
-		BaseDeploymentID: baseDeploymentID,
-		Content:          contentBytes,
-		Metadata:         req.Metadata,
-		CreatedAt:        time.Now(),
+	// Handle endpoint URL override from metadata (Phase 5)
+	if req.Metadata != nil {
+		if v, exists := metadata["endpointUrl"]; exists {
+			endpointURL, ok := v.(string)
+			if !ok {
+				return nil, fmt.Errorf("invalid endpoint URL in metadata: expected string, got %T", v)
+			}
+			if endpointURL != "" {
+				// Validate endpoint URL format
+				if err := validateEndpointURL(endpointURL); err != nil {
+					return nil, fmt.Errorf("invalid endpoint URL in metadata: %w", err)
+				}
+
+				// Override endpoint URL in deployment content
+				modifiedContent, err := overrideEndpointURL(contentBytes, endpointURL)
+				if err != nil {
+					return nil, fmt.Errorf("failed to override endpoint URL: %w", err)
+				}
+				contentBytes = modifiedContent
+				s.slogger.Info("Endpoint URL overridden", "endpointURL", endpointURL, "deploymentID", deploymentID)
+			}
+		}
 	}
 
-	if err := s.apiRepo.CreateDeployment(deployment); err != nil {
+	// Create new deployment record with limit enforcement
+	// Hard limit = soft limit (configured) + 5 buffer for concurrent deployments
+	deployment := &model.Deployment{
+		DeploymentID:     deploymentID,
+		Name:             req.Name,
+		ArtifactID:       apiUUID,
+		OrganizationID:   orgUUID,
+		GatewayID:        gatewayID,
+		BaseDeploymentID: baseDeploymentID,
+		Content:          contentBytes,
+		Metadata:         metadata,
+	}
+
+	// Use CreateDeploymentWithLimitEnforcement - handles count, cleanup, insert, and status update atomically
+	if s.cfg.Deployments.MaxPerAPIGateway < 1 {
+		return nil, fmt.Errorf("MaxPerAPIGateway limit config must be at least 1, got %d", s.cfg.Deployments.MaxPerAPIGateway)
+	}
+	hardLimit := s.cfg.Deployments.MaxPerAPIGateway + constants.DeploymentLimitBuffer
+	if err := s.deploymentRepo.CreateWithLimitEnforcement(deployment, hardLimit); err != nil {
 		return nil, fmt.Errorf("failed to create deployment: %w", err)
 	}
 
 	// Ensure API-Gateway association exists
-	// TODO:// Handle error properly (maybe rollback deployment?)
-	if err := s.ensureAPIGatewayAssociation(apiUUID, req.GatewayID, orgUUID); err != nil {
-		log.Printf("[WARN] Failed to ensure API-gateway association: %v", err)
+	if err := s.ensureAPIGatewayAssociation(apiUUID, gatewayID, orgUUID); err != nil {
+		s.slogger.Warn("Failed to ensure API-gateway association", "error", err)
 	}
 
 	// Send deployment event to gateway
 	if s.gatewayEventsService != nil {
-		deploymentEvent := &model.APIDeploymentEvent{
+		deploymentEvent := &model.DeploymentEvent{
 			ApiId:        apiUUID,
 			DeploymentID: deploymentID,
 			Vhost:        gateway.Vhost,
-			Environment:  "production",
 		}
 
-		if err := s.gatewayEventsService.BroadcastDeploymentEvent(req.GatewayID, deploymentEvent); err != nil {
-			log.Printf("[WARN] Failed to broadcast deployment event: %v", err)
+		if err := s.gatewayEventsService.BroadcastDeploymentEvent(gatewayID, deploymentEvent); err != nil {
+			s.slogger.Warn("Failed to broadcast deployment event", "error", err)
 		}
 	}
 
-	// Return deployment response
-	return &dto.DeploymentResponse{
-		DeploymentID:     deployment.DeploymentID,
-		GatewayID:        deployment.GatewayID,
-		Status:           string(deployment.Status),
-		BaseDeploymentID: deployment.BaseDeploymentID,
-		Metadata:         deployment.Metadata,
-		CreatedAt:        deployment.CreatedAt,
-	}, nil
+	// Return deployment response (status and updatedAt are set by CreateDeploymentWithLimitEnforcement)
+	return toAPIDeploymentResponse(
+		deployment.DeploymentID,
+		deployment.Name,
+		deployment.GatewayID,
+		model.DeploymentStatusDeployed,
+		deployment.BaseDeploymentID,
+		deployment.Metadata,
+		deployment.CreatedAt,
+		deployment.UpdatedAt,
+	)
 }
 
-// RedeployDeployment re-deploys an existing undeployed deployment artifact
-func (s *DeploymentService) RedeployDeployment(apiUUID, deploymentID, orgUUID string) (*dto.DeploymentResponse, error) {
-	// Get the deployment
-	deployment, err := s.apiRepo.GetDeploymentByID(deploymentID, apiUUID, orgUUID)
+// RestoreDeployment restores a previous deployment (can be ARCHIVED or UNDEPLOYED)
+func (s *DeploymentService) RestoreDeployment(apiUUID, deploymentID, gatewayID, orgUUID string) (*api.DeploymentResponse, error) {
+	// Verify target deployment exists and belongs to the API
+	targetDeployment, err := s.deploymentRepo.GetWithContent(deploymentID, apiUUID, orgUUID)
 	if err != nil {
 		return nil, err
 	}
-	if deployment == nil {
+	if targetDeployment == nil {
 		return nil, constants.ErrDeploymentNotFound
 	}
-	if deployment.Status == model.DeploymentStatusDeployed {
-		return nil, constants.ErrDeploymentAlreadyActive
+
+	// Validate that the provided gatewayID matches the deployment's bound gateway
+	if targetDeployment.GatewayID != gatewayID {
+		return nil, constants.ErrGatewayIDMismatch
+	}
+
+	// Verify target deployment is NOT currently DEPLOYED
+	currentDeploymentID, status, _, err := s.deploymentRepo.GetStatus(apiUUID, orgUUID, targetDeployment.GatewayID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get deployment status: %w", err)
+	}
+	if currentDeploymentID == deploymentID && status == model.DeploymentStatusDeployed {
+		return nil, constants.ErrDeploymentAlreadyDeployed
 	}
 
 	// Validate gateway exists and belongs to organization
-	gateway, err := s.gatewayRepo.GetByUUID(deployment.GatewayID)
+	gateway, err := s.gatewayRepo.GetByUUID(targetDeployment.GatewayID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get gateway: %w", err)
 	}
-	if gateway == nil {
+	if gateway == nil || gateway.OrganizationID != orgUUID {
 		return nil, constants.ErrGatewayNotFound
 	}
 
-	// Check if there's an existing active deployment on this gateway
-	existingDeployment, err := s.apiRepo.GetActiveDeploymentByGateway(apiUUID, deployment.GatewayID, orgUUID)
+	// Use SetCurrentDeployment to activate the target deployment with status='DEPLOYED'
+	updatedAt, err := s.deploymentRepo.SetCurrent(apiUUID, orgUUID, targetDeployment.GatewayID, deploymentID, model.DeploymentStatusDeployed)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check existing deployments: %w", err)
-	}
-
-	// If exists, mark it as UNDEPLOYED (but don't send undeployment event yet)
-	// TODO:// The gateway will receive the new deployment event and update the deployment
-	if existingDeployment != nil {
-		if err := s.apiRepo.UpdateDeploymentStatus(existingDeployment.DeploymentID, apiUUID, string(model.DeploymentStatusUndeployed), orgUUID); err != nil {
-			return nil, fmt.Errorf("failed to undeploy existing deployment %s: %w", existingDeployment.DeploymentID, err)
-
-		}
-	}
-
-	// Update status to DEPLOYED
-	if err := s.apiRepo.UpdateDeploymentStatus(deploymentID, apiUUID, string(model.DeploymentStatusDeployed), orgUUID); err != nil {
-		return nil, fmt.Errorf("failed to update deployment status: %w", err)
+		return nil, fmt.Errorf("failed to set current deployment: %w", err)
 	}
 
 	// Send deployment event to gateway
 	if s.gatewayEventsService != nil {
-		vhost := gateway.Vhost
-		deploymentEvent := &model.APIDeploymentEvent{
+		deploymentEvent := &model.DeploymentEvent{
 			ApiId:        apiUUID,
 			DeploymentID: deploymentID,
-			Vhost:        vhost,
-			Environment:  "production",
+			Vhost:        gateway.Vhost,
 		}
 
-		if err := s.gatewayEventsService.BroadcastDeploymentEvent(deployment.GatewayID, deploymentEvent); err != nil {
-			log.Printf("[WARN] Failed to broadcast deployment event: %v", err)
+		if err := s.gatewayEventsService.BroadcastDeploymentEvent(targetDeployment.GatewayID, deploymentEvent); err != nil {
+			s.slogger.Warn("Failed to broadcast deployment event", "error", err)
 		}
 	}
 
-	deployment.Status = model.DeploymentStatusDeployed
-
-	return &dto.DeploymentResponse{
-		DeploymentID:     deployment.DeploymentID,
-		GatewayID:        deployment.GatewayID,
-		Status:           string(deployment.Status),
-		BaseDeploymentID: deployment.BaseDeploymentID,
-		Metadata:         deployment.Metadata,
-		CreatedAt:        deployment.CreatedAt,
-	}, nil
+	return toAPIDeploymentResponse(
+		targetDeployment.DeploymentID,
+		targetDeployment.Name,
+		targetDeployment.GatewayID,
+		model.DeploymentStatusDeployed,
+		targetDeployment.BaseDeploymentID,
+		targetDeployment.Metadata,
+		targetDeployment.CreatedAt,
+		&updatedAt,
+	)
 }
 
 // UndeployDeployment undeploys an active deployment
-func (s *DeploymentService) UndeployDeployment(apiUUID, deploymentID, orgUUID string) (*dto.DeploymentResponse, error) {
-	// Get the deployment
-	deployment, err := s.apiRepo.GetDeploymentByID(deploymentID, apiUUID, orgUUID)
+func (s *DeploymentService) UndeployDeployment(apiUUID, deploymentID, gatewayID, orgUUID string) (*api.DeploymentResponse, error) {
+	// Verify deployment exists and belongs to API
+	deployment, err := s.deploymentRepo.GetWithState(deploymentID, apiUUID, orgUUID)
 	if err != nil {
 		return nil, err
 	}
 	if deployment == nil {
 		return nil, constants.ErrDeploymentNotFound
 	}
-	if deployment.Status != model.DeploymentStatusDeployed {
+
+	// Validate that the provided gatewayID matches the deployment's bound gateway
+	if deployment.GatewayID != gatewayID {
+		return nil, constants.ErrGatewayIDMismatch
+	}
+
+	// Verify deployment is currently DEPLOYED (status already populated by GetDeploymentWithState)
+	if deployment.Status == nil || *deployment.Status != model.DeploymentStatusDeployed {
 		return nil, constants.ErrDeploymentNotActive
 	}
 
@@ -311,8 +315,9 @@ func (s *DeploymentService) UndeployDeployment(apiUUID, deploymentID, orgUUID st
 		return nil, constants.ErrGatewayNotFound
 	}
 
-	// Update status to UNDEPLOYED
-	if err := s.apiRepo.UpdateDeploymentStatus(deploymentID, apiUUID, string(model.DeploymentStatusUndeployed), orgUUID); err != nil {
+	// Update status to UNDEPLOYED using SetCurrentDeployment
+	newUpdatedAt, err := s.deploymentRepo.SetCurrent(apiUUID, orgUUID, deployment.GatewayID, deploymentID, model.DeploymentStatusUndeployed)
+	if err != nil {
 		return nil, fmt.Errorf("failed to update deployment status: %w", err)
 	}
 
@@ -320,52 +325,107 @@ func (s *DeploymentService) UndeployDeployment(apiUUID, deploymentID, orgUUID st
 	if s.gatewayEventsService != nil {
 		vhost := gateway.Vhost
 		undeploymentEvent := &model.APIUndeploymentEvent{
-			ApiId:       apiUUID,
-			Vhost:       vhost,
-			Environment: "production",
+			ApiId: apiUUID,
+			Vhost: vhost,
 		}
 
 		if err := s.gatewayEventsService.BroadcastUndeploymentEvent(deployment.GatewayID, undeploymentEvent); err != nil {
-			log.Printf("[WARN] Failed to broadcast undeployment event: %v", err)
+			s.slogger.Warn("Failed to broadcast undeployment event", "error", err)
 		}
 	}
 
-	deployment.Status = model.DeploymentStatusUndeployed
-
-	return &dto.DeploymentResponse{
-		DeploymentID:     deployment.DeploymentID,
-		GatewayID:        deployment.GatewayID,
-		Status:           string(deployment.Status),
-		BaseDeploymentID: deployment.BaseDeploymentID,
-		Metadata:         deployment.Metadata,
-		CreatedAt:        deployment.CreatedAt,
-	}, nil
+	return toAPIDeploymentResponse(
+		deployment.DeploymentID,
+		deployment.Name,
+		deployment.GatewayID,
+		model.DeploymentStatusUndeployed,
+		deployment.BaseDeploymentID,
+		deployment.Metadata,
+		deployment.CreatedAt,
+		&newUpdatedAt,
+	)
 }
 
 // DeleteDeployment permanently deletes an undeployed deployment artifact
 func (s *DeploymentService) DeleteDeployment(apiUUID, deploymentID, orgUUID string) error {
-	// Get the deployment
-	deployment, err := s.apiRepo.GetDeploymentByID(deploymentID, apiUUID, orgUUID)
+	// Verify deployment exists and belongs to the API
+	deployment, err := s.deploymentRepo.GetWithState(deploymentID, apiUUID, orgUUID)
 	if err != nil {
 		return err
 	}
 	if deployment == nil {
 		return constants.ErrDeploymentNotFound
 	}
-	if deployment.Status == model.DeploymentStatusDeployed {
+
+	// Verify deployment is NOT currently DEPLOYED (status already populated by GetDeploymentWithState)
+	if deployment.Status != nil && *deployment.Status == model.DeploymentStatusDeployed {
 		return constants.ErrDeploymentIsDeployed
 	}
 
-	// Delete the deployment
-	if err := s.apiRepo.DeleteDeployment(deploymentID, apiUUID, orgUUID); err != nil {
+	// Delete the deployment artifact
+	if err := s.deploymentRepo.Delete(deploymentID, apiUUID, orgUUID); err != nil {
 		return fmt.Errorf("failed to delete deployment: %w", err)
 	}
 
 	return nil
 }
 
+// validateEndpointURL validates the format of an endpoint URL
+func validateEndpointURL(endpointURL string) error {
+	if endpointURL == "" {
+		return fmt.Errorf("endpoint URL cannot be empty")
+	}
+
+	parsedURL, err := url.Parse(endpointURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL format: %w", err)
+	}
+
+	// Validate scheme (must be http or https)
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("URL scheme must be http or https, got: %s", parsedURL.Scheme)
+	}
+
+	// Validate host is present
+	if parsedURL.Host == "" {
+		return fmt.Errorf("URL must have a valid host")
+	}
+
+	return nil
+}
+
+// overrideEndpointURL parses the deployment YAML, overrides the upstream URL, and returns modified bytes
+func overrideEndpointURL(contentBytes []byte, newURL string) ([]byte, error) {
+	var apiDeployment dto.APIDeploymentYAML
+
+	// Parse existing YAML
+	if err := yaml.Unmarshal(contentBytes, &apiDeployment); err != nil {
+		return nil, fmt.Errorf("failed to parse deployment YAML: %w", err)
+	}
+
+	// Ensure upstream section exists
+	if apiDeployment.Spec.Upstream == nil {
+		apiDeployment.Spec.Upstream = &dto.UpstreamYAML{}
+	}
+
+	// Override main upstream URL (production endpoint)
+	if apiDeployment.Spec.Upstream.Main == nil {
+		apiDeployment.Spec.Upstream.Main = &dto.UpstreamTarget{}
+	}
+	apiDeployment.Spec.Upstream.Main.URL = newURL
+	apiDeployment.Spec.Upstream.Main.Ref = "" // Clear ref if URL is set
+
+	// Serialize back to YAML
+	modifiedBytes, err := yaml.Marshal(&apiDeployment)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal modified YAML: %w", err)
+	}
+
+	return modifiedBytes, nil
+}
+
 // GetDeployments retrieves all deployments for an API with optional filters
-func (s *DeploymentService) GetDeployments(apiUUID, orgUUID string, gatewayID *string, status *string) (*dto.DeploymentListResponse, error) {
+func (s *DeploymentService) GetDeployments(apiUUID, orgUUID string, gatewayID *string, status *string) (*api.DeploymentListResponse, error) {
 	// Verify API exists
 	apiModel, err := s.apiRepo.GetAPIByUUID(apiUUID, orgUUID)
 	if err != nil {
@@ -375,37 +435,53 @@ func (s *DeploymentService) GetDeployments(apiUUID, orgUUID string, gatewayID *s
 		return nil, constants.ErrAPINotFound
 	}
 
-	if (status != nil) && (*status != string(model.DeploymentStatusDeployed) && *status != string(model.DeploymentStatusUndeployed)) {
-		return nil, constants.ErrInvalidDeploymentStatus
+	// Validate status parameter
+	if status != nil {
+		validStatuses := map[string]bool{
+			string(model.DeploymentStatusDeployed):   true,
+			string(model.DeploymentStatusUndeployed): true,
+			string(model.DeploymentStatusArchived):   true,
+		}
+		if !validStatuses[*status] {
+			return nil, constants.ErrInvalidDeploymentStatus
+		}
 	}
 
-	// Get deployments
-	deployments, err := s.apiRepo.GetDeploymentsByAPIUUID(apiUUID, orgUUID, gatewayID, status)
+	if s.cfg.Deployments.MaxPerAPIGateway < 1 {
+		return nil, fmt.Errorf("MaxPerAPIGateway config value must be at least 1, got %d", s.cfg.Deployments.MaxPerAPIGateway)
+	}
+	// Get deployments with state derived via LEFT JOIN
+	deployments, err := s.deploymentRepo.GetDeploymentsWithState(apiUUID, orgUUID, gatewayID, status, s.cfg.Deployments.MaxPerAPIGateway)
 	if err != nil {
 		return nil, err
 	}
 
-	// Convert to DTOs
-	var deploymentDTOs = []*dto.DeploymentResponse{}
+	items := make([]api.DeploymentResponse, 0, len(deployments))
 	for _, d := range deployments {
-		deploymentDTOs = append(deploymentDTOs, &dto.DeploymentResponse{
-			DeploymentID:     d.DeploymentID,
-			GatewayID:        d.GatewayID,
-			Status:           string(d.Status),
-			BaseDeploymentID: d.BaseDeploymentID,
-			Metadata:         d.Metadata,
-			CreatedAt:        d.CreatedAt,
-		})
+		mapped, err := toAPIDeploymentResponse(
+			d.DeploymentID,
+			d.Name,
+			d.GatewayID,
+			*d.Status,
+			d.BaseDeploymentID,
+			d.Metadata,
+			d.CreatedAt,
+			d.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, *mapped)
 	}
 
-	return &dto.DeploymentListResponse{
-		Count: len(deploymentDTOs),
-		List:  deploymentDTOs,
+	return &api.DeploymentListResponse{
+		Count: len(items),
+		List:  items,
 	}, nil
 }
 
 // GetDeployment retrieves a specific deployment by ID
-func (s *DeploymentService) GetDeployment(apiUUID, deploymentID, orgUUID string) (*dto.DeploymentResponse, error) {
+func (s *DeploymentService) GetDeployment(apiUUID, deploymentID, orgUUID string) (*api.DeploymentResponse, error) {
 	// Verify API exists
 	apiModel, err := s.apiRepo.GetAPIByUUID(apiUUID, orgUUID)
 	if err != nil {
@@ -415,8 +491,8 @@ func (s *DeploymentService) GetDeployment(apiUUID, deploymentID, orgUUID string)
 		return nil, constants.ErrAPINotFound
 	}
 
-	// Get deployment - apiId is validated at repository level
-	deployment, err := s.apiRepo.GetDeploymentByID(deploymentID, apiUUID, orgUUID)
+	// Get deployment with state derived via LEFT JOIN
+	deployment, err := s.deploymentRepo.GetWithState(deploymentID, apiUUID, orgUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -424,21 +500,22 @@ func (s *DeploymentService) GetDeployment(apiUUID, deploymentID, orgUUID string)
 		return nil, constants.ErrDeploymentNotFound
 	}
 
-	// Convert to DTO
-	return &dto.DeploymentResponse{
-		DeploymentID:     deployment.DeploymentID,
-		GatewayID:        deployment.GatewayID,
-		Status:           string(deployment.Status),
-		BaseDeploymentID: deployment.BaseDeploymentID,
-		Metadata:         deployment.Metadata,
-		CreatedAt:        deployment.CreatedAt,
-	}, nil
+	return toAPIDeploymentResponse(
+		deployment.DeploymentID,
+		deployment.Name,
+		deployment.GatewayID,
+		*deployment.Status,
+		deployment.BaseDeploymentID,
+		deployment.Metadata,
+		deployment.CreatedAt,
+		deployment.UpdatedAt,
+	)
 }
 
 // GetDeploymentContent retrieves the immutable content of a deployment
 func (s *DeploymentService) GetDeploymentContent(apiUUID, deploymentID, orgUUID string) ([]byte, error) {
-	// Verify deployment exists and belongs to the API
-	deployment, err := s.apiRepo.GetDeploymentByID(deploymentID, apiUUID, orgUUID)
+	// Get deployment with content
+	deployment, err := s.deploymentRepo.GetWithContent(deploymentID, apiUUID, orgUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -446,13 +523,7 @@ func (s *DeploymentService) GetDeploymentContent(apiUUID, deploymentID, orgUUID 
 		return nil, constants.ErrDeploymentNotFound
 	}
 
-	// Get content - apiId is validated at repository level
-	content, err := s.apiRepo.GetDeploymentContent(deploymentID, apiUUID, orgUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get deployment content: %w", err)
-	}
-
-	return content, nil
+	return deployment.Content, nil
 }
 
 // ensureAPIGatewayAssociation ensures an association exists between API and gateway
@@ -472,7 +543,7 @@ func (s *DeploymentService) ensureAPIGatewayAssociation(apiUUID, gatewayID, orgU
 
 	// Create new association
 	association := &model.APIAssociation{
-		ApiID:           apiUUID,
+		ArtifactID:      apiUUID,
 		OrganizationID:  orgUUID,
 		ResourceID:      gatewayID,
 		AssociationType: constants.AssociationTypeGateway,
@@ -484,9 +555,9 @@ func (s *DeploymentService) ensureAPIGatewayAssociation(apiUUID, gatewayID, orgU
 }
 
 // DeployAPIByHandle creates a new immutable deployment artifact using API handle
-func (s *DeploymentService) DeployAPIByHandle(apiHandle string, req *dto.DeployAPIRequest, orgUUID string) (*dto.DeploymentResponse, error) {
+func (s *DeploymentService) DeployAPIByHandle(apiHandle string, req *api.DeployRequest, orgUUID string) (*api.DeploymentResponse, error) {
 	// Convert API handle to UUID
-	apiUUID, err := s.getAPIUUIDByHandle(apiHandle, orgUUID)
+	apiUUID, err := s.getUUIDByHandle(apiHandle, orgUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -494,27 +565,38 @@ func (s *DeploymentService) DeployAPIByHandle(apiHandle string, req *dto.DeployA
 	return s.DeployAPI(apiUUID, req, orgUUID)
 }
 
-// getAPIUUIDByHandle retrieves the internal UUID for an API by its handle
-func (s *DeploymentService) getAPIUUIDByHandle(handle, orgUUID string) (string, error) {
-	if handle == "" {
-		return "", errors.New("API handle is required")
+// RestoreDeploymentByHandle restores a previous deployment using API handle
+func (s *DeploymentService) RestoreDeploymentByHandle(apiHandle, deploymentID, gatewayID, orgUUID string) (*api.DeploymentResponse, error) {
+	// Convert API handle to UUID
+	apiUUID, err := s.getUUIDByHandle(apiHandle, orgUUID)
+	if err != nil {
+		return nil, err
 	}
 
-	metadata, err := s.apiRepo.GetAPIMetadataByHandle(handle, orgUUID)
+	return s.RestoreDeployment(apiUUID, deploymentID, gatewayID, orgUUID)
+}
+
+// getUUIDByHandle retrieves the artifact UUID by its handle from the artifact table
+func (s *DeploymentService) getUUIDByHandle(handle, orgUUID string) (string, error) {
+	if handle == "" {
+		return "", errors.New("artifact handle is required")
+	}
+
+	artifact, err := s.artifactRepo.GetByHandle(handle, orgUUID)
 	if err != nil {
 		return "", err
 	}
-	if metadata == nil {
-		return "", constants.ErrAPINotFound
+	if artifact == nil {
+		return "", constants.ErrArtifactNotFound
 	}
 
-	return metadata.ID, nil
+	return artifact.UUID, nil
 }
 
 // GetDeploymentByHandle retrieves a single deployment using API handle
-func (s *DeploymentService) GetDeploymentByHandle(apiHandle, deploymentID, orgUUID string) (*dto.DeploymentResponse, error) {
+func (s *DeploymentService) GetDeploymentByHandle(apiHandle, deploymentID, orgUUID string) (*api.DeploymentResponse, error) {
 	// Convert API handle to UUID
-	apiUUID, err := s.getAPIUUIDByHandle(apiHandle, orgUUID)
+	apiUUID, err := s.getUUIDByHandle(apiHandle, orgUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -523,9 +605,9 @@ func (s *DeploymentService) GetDeploymentByHandle(apiHandle, deploymentID, orgUU
 }
 
 // GetDeploymentsByHandle retrieves deployments for an API using handle
-func (s *DeploymentService) GetDeploymentsByHandle(apiHandle, gatewayID, status, orgUUID string) (*dto.DeploymentListResponse, error) {
+func (s *DeploymentService) GetDeploymentsByHandle(apiHandle, gatewayID, status, orgUUID string) (*api.DeploymentListResponse, error) {
 	// Convert API handle to UUID
-	apiUUID, err := s.getAPIUUIDByHandle(apiHandle, orgUUID)
+	apiUUID, err := s.getUUIDByHandle(apiHandle, orgUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -543,32 +625,21 @@ func (s *DeploymentService) GetDeploymentsByHandle(apiHandle, gatewayID, status,
 	return s.GetDeployments(apiUUID, orgUUID, gatewayIdPtr, statusPtr)
 }
 
-// RedeployDeploymentByHandle redeploys an existing deployment using API handle
-func (s *DeploymentService) RedeployDeploymentByHandle(apiHandle, deploymentID, orgUUID string) (*dto.DeploymentResponse, error) {
-	// Convert API handle to UUID
-	apiUUID, err := s.getAPIUUIDByHandle(apiHandle, orgUUID)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.RedeployDeployment(apiUUID, deploymentID, orgUUID)
-}
-
 // UndeployDeploymentByHandle undeploys a deployment using API handle
-func (s *DeploymentService) UndeployDeploymentByHandle(apiHandle, deploymentID, orgUUID string) (*dto.DeploymentResponse, error) {
+func (s *DeploymentService) UndeployDeploymentByHandle(apiHandle, deploymentID, gatewayID, orgUUID string) (*api.DeploymentResponse, error) {
 	// Convert API handle to UUID
-	apiUUID, err := s.getAPIUUIDByHandle(apiHandle, orgUUID)
+	apiUUID, err := s.getUUIDByHandle(apiHandle, orgUUID)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.UndeployDeployment(apiUUID, deploymentID, orgUUID)
+	return s.UndeployDeployment(apiUUID, deploymentID, gatewayID, orgUUID)
 }
 
 // DeleteDeploymentByHandle deletes a deployment using API handle
 func (s *DeploymentService) DeleteDeploymentByHandle(apiHandle, deploymentID, orgUUID string) error {
 	// Convert API handle to UUID
-	apiUUID, err := s.getAPIUUIDByHandle(apiHandle, orgUUID)
+	apiUUID, err := s.getUUIDByHandle(apiHandle, orgUUID)
 	if err != nil {
 		return err
 	}
@@ -579,10 +650,36 @@ func (s *DeploymentService) DeleteDeploymentByHandle(apiHandle, deploymentID, or
 // GetDeploymentContentByHandle retrieves deployment artifact content using API handle
 func (s *DeploymentService) GetDeploymentContentByHandle(apiHandle, deploymentID, orgUUID string) ([]byte, error) {
 	// Convert API handle to UUID
-	apiUUID, err := s.getAPIUUIDByHandle(apiHandle, orgUUID)
+	apiUUID, err := s.getUUIDByHandle(apiHandle, orgUUID)
 	if err != nil {
 		return nil, err
 	}
 
 	return s.GetDeploymentContent(apiUUID, deploymentID, orgUUID)
+}
+
+func toAPIDeploymentResponse(
+	deploymentID string,
+	name string,
+	gatewayID string,
+	status model.DeploymentStatus,
+	baseDeploymentID *string,
+	metadata map[string]interface{},
+	createdAt time.Time,
+	updatedAt *time.Time,
+) (*api.DeploymentResponse, error) {
+	deploymentUUID := utils.ParseOpenAPIUUIDOrZero(deploymentID)
+	gatewayUUID := utils.ParseOpenAPIUUIDOrZero(gatewayID)
+	baseUUID := utils.ParseOptionalOpenAPIUUID(baseDeploymentID)
+
+	return &api.DeploymentResponse{
+		BaseDeploymentId: baseUUID,
+		CreatedAt:        createdAt,
+		DeploymentId:     deploymentUUID,
+		GatewayId:        gatewayUUID,
+		Metadata:         utils.MapPtrIfNotEmpty(metadata),
+		Name:             name,
+		Status:           api.DeploymentResponseStatus(status),
+		UpdatedAt:        updatedAt,
+	}, nil
 }

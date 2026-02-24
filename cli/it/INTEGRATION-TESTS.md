@@ -59,7 +59,7 @@ cli/it/
 │   └── gateway/                  # Gateway-specific test resources
 │       ├── sample-api.yaml       # API definition for testing
 │       ├── sample-mcp-config.yaml # MCP config for testing
-│       └── policy-manifest.yaml  # Policy manifest for build tests
+│       └── build.yaml             # Policy manifest for build tests
 ├── features/
 │   └── gateway/                  # Gateway-related feature files
 │       ├── management.feature    # add, list, remove, use, current, health
@@ -501,7 +501,7 @@ Duration: 1.23s
 
 ### Story 10: Gateway Build Tests
 - [ ] Create `features/gateway/build.feature`
-- [ ] Create `resources/gateway/policy-manifest.yaml`
+- [ ] Create `resources/gateway/build.yaml`
 - [ ] Implement all BUILD-* test scenarios
 
 ### Story 11: Documentation
@@ -620,7 +620,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.1'
+          go-version: '1.25.7'
       
       - name: Run CLI Integration Tests
         run: |
@@ -668,7 +668,7 @@ pipeline {
   - `ghcr.io/wso2/api-platform/gateway-controller-coverage:0.3.0-SNAPSHOT`
   - `ghcr.io/wso2/api-platform/policy-engine:0.3.0-SNAPSHOT`
   - `ghcr.io/wso2/api-platform/gateway-router:0.3.0-SNAPSHOT`
-  - `renukafernando/request-info:latest`
+  - `ghcr.io/wso2/api-platform/sample-service:latest`
   - `rakhitharr/mcp-everything:v3`
 
 ---

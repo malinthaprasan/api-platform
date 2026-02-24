@@ -1,6 +1,6 @@
 module github.com/wso2/api-platform/gateway/gateway-controller
 
-go 1.25.1
+go 1.25.7
 
 require (
 	github.com/envoyproxy/go-control-plane v0.13.5-0.20251024222203-75eaa193e329
@@ -10,6 +10,8 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/jackc/pgx/v5 v5.8.0
+	github.com/jmoiron/sqlx v1.4.0
 	github.com/knadh/koanf/parsers/toml/v2 v2.2.0
 	github.com/knadh/koanf/providers/env v1.1.0
 	github.com/knadh/koanf/providers/file v1.2.1
@@ -17,18 +19,19 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/oapi-codegen/runtime v1.1.2
 	github.com/prometheus/client_golang v1.23.2
+	github.com/prometheus/client_model v0.6.2
 	github.com/stretchr/testify v1.11.1
 	github.com/wso2/api-platform/common v0.0.0
-	github.com/wso2/api-platform/sdk v0.0.0
+	github.com/wso2/api-platform/sdk v0.3.14
 	github.com/xeipuuv/gojsonschema v1.2.0
-	golang.org/x/crypto v0.46.0
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
+	gotest.tools/v3 v3.5.2
 )
 
 require (
-	cel.dev/expr v0.24.0 // indirect
+	cel.dev/expr v0.25.1 // indirect
 	github.com/MicahParks/jwkset v0.11.0 // indirect
 	github.com/MicahParks/keyfunc/v3 v3.7.0 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
@@ -52,7 +55,11 @@ require (
 	github.com/go-playground/validator/v10 v10.29.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.19.1 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
@@ -72,7 +79,6 @@ require (
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
@@ -85,19 +91,17 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.39.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/arch v0.23.0 // indirect
-	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/crypto v0.47.0 // indirect
+	golang.org/x/net v0.49.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20251213004720-97cd9d5aeac2 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251213004720-97cd9d5aeac2 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 // indirect
 )
 
 // combinedWatcher is using "github.com/envoyproxy/go-control-plane/pkg/server/stream/v3" StreamState which is not available in v0.14.0
 replace github.com/envoyproxy/go-control-plane v0.13.5-0.20251024222203-75eaa193e329 => github.com/envoyproxy/go-control-plane v0.13.4
 
-// Local module replacements for Docker builds
-replace (
-	github.com/wso2/api-platform/common => ../../common
-	github.com/wso2/api-platform/sdk => ../../sdk
-)
+replace github.com/wso2/api-platform/common => ../../common

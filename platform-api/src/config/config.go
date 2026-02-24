@@ -36,6 +36,9 @@ type Server struct {
 	Database     Database `envconfig:"DATABASE"`
 	DBSchemaPath string   `envconfig:"DB_SCHEMA_PATH" default:"./internal/database/schema.sql"`
 
+	// LLM provider template bootstrap (used to seed defaults into the DB)
+	LLMTemplateDefinitionsPath string `envconfig:"LLM_TEMPLATE_DEFINITIONS_PATH" default:"./resources/default-llm-provider-templates"`
+
 	// JWT Authentication configurations
 	JWT JWT `envconfig:"JWT"`
 
@@ -60,15 +63,18 @@ type TLS struct {
 type JWT struct {
 	SecretKey      string   `envconfig:"SECRET_KEY" default:"your-secret-key-change-in-production"`
 	Issuer         string   `envconfig:"ISSUER" default:"thunder"`
-	SkipPaths      []string `envconfig:"SKIP_PATHS" default:"/health,/metrics,/api/internal/v1/ws/gateways/connect,/api/internal/v1/apis"`
+	SkipPaths      []string `envconfig:"SKIP_PATHS" default:"/health,/metrics,/api/internal/v1/ws/gateways/connect,/api/internal/v1/apis,/api/internal/v1/llm-providers,/api/internal/v1/llm-proxies"`
 	SkipValidation bool     `envconfig:"SKIP_VALIDATION" default:"true"` // Skip signature validation for development
 }
 
 // WebSocket holds WebSocket-specific configuration
 type WebSocket struct {
-	MaxConnections    int `envconfig:"WS_MAX_CONNECTIONS" default:"1000"`
-	ConnectionTimeout int `envconfig:"WS_CONNECTION_TIMEOUT" default:"30"` // seconds
-	RateLimitPerMin   int `envconfig:"WS_RATE_LIMIT_PER_MINUTE" default:"10"`
+	MaxConnections       int  `envconfig:"WS_MAX_CONNECTIONS" default:"1000"`
+	ConnectionTimeout    int  `envconfig:"WS_CONNECTION_TIMEOUT" default:"30"` // seconds
+	RateLimitPerMin      int  `envconfig:"WS_RATE_LIMIT_PER_MINUTE" default:"1000"`
+	MaxConnectionsPerOrg int  `envconfig:"WS_MAX_CONNECTIONS_PER_ORG" default:"3"`
+	MetricsLogEnabled    bool `envconfig:"WS_METRICS_LOG_ENABLED" default:"true"`
+	MetricsLogInterval   int  `envconfig:"WS_METRICS_LOG_INTERVAL" default:"10"` // seconds
 }
 
 // Database holds database-specific configuration
@@ -86,6 +92,11 @@ type Database struct {
 	MaxOpenConns    int    `envconfig:"MAX_OPEN_CONNS" default:"25"`
 	MaxIdleConns    int    `envconfig:"MAX_IDLE_CONNS" default:"10"`
 	ConnMaxLifetime int    `envconfig:"CONN_MAX_LIFETIME" default:"300"` // seconds
+
+	// ExecuteSchemaDDL controls whether to run the schema DDL (CREATE TABLE, etc.) on startup.
+	// Set to false when the DB user lacks DDL privileges (e.g. deployed Postgres with restricted role).
+	// Env: DATABASE_EXECUTE_SCHEMA_DDL (default: true)
+	ExecuteSchemaDDL bool `envconfig:"EXECUTE_SCHEMA_DDL" default:"true"`
 }
 
 // DefaultDevPortal holds default DevPortal configuration for new organizations

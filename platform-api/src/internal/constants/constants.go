@@ -65,6 +65,14 @@ var ValidGatewayFunctionalityType = map[string]bool{
 // DefaultGatewayFunctionalityType Default gateway functionality type for new gateways
 const DefaultGatewayFunctionalityType = GatewayFunctionalityTypeRegular
 
+// Kinds of artifacts
+const (
+	RestApi     = "RestApi"
+	WebSubApi   = "WebSubApi"
+	LLMProvider = "LlmProvider"
+	LLMProxy    = "LlmProxy"
+)
+
 // API Type Constants
 const (
 	APITypeHTTP       = "HTTP"
@@ -105,4 +113,15 @@ var ValidArtifactTypes = map[string]bool{
 const (
 	AssociationTypeGateway   = "gateway"
 	AssociationTypeDevPortal = "dev_portal"
+)
+
+// Deployment limit constants
+const (
+	// DeploymentLimitBuffer is the buffer added to MaxPerAPIGateway for hard limit enforcement
+	DeploymentLimitBuffer = 5
+
+	// MaxLLMProvidersPerOrganization is the maximum number of LLM providers allowed per organization.
+	MaxLLMProvidersPerOrganization = 5
+	// MaxLLMProxiesPerOrganization is the maximum number of LLM proxies allowed per organization.
+	MaxLLMProxiesPerOrganization = 5
 )

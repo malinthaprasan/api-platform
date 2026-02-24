@@ -260,7 +260,7 @@ paths:
         Returns the metadata of the API and the resources if the API project is valid.
       operationId: ValidateAPIProject
       tags:
-        - APIs
+        - REST APIs
       requestBody:
         description: API project validation details
         required: true
@@ -274,7 +274,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIProjectValidationResponse'
+                $ref: '#/components/schemas/RESTAPIProjectValidationResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -286,7 +286,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /validate/open-api:
+  /validate/openapi:
     post:
       summary: Validate OpenAPI definition
       description: |
@@ -295,7 +295,7 @@ paths:
         such as name, and operations if the definition is valid.
       operationId: ValidateOpenAPI
       tags:
-        - APIs
+        - REST APIs
       requestBody:
         description: OpenAPI definition validation details
         required: true
@@ -317,16 +317,17 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /import/open-api:
+  /import/openapi:
     post:
       summary: Import and create API from OpenAPI definition
       description: |
         Imports an OpenAPI definition into the platform from a provided URL or file upload.
-        An API is created from the imported OpenAPI definition and is associated with a specified project within the
+        A REST API is created from the imported OpenAPI definition and is associated with a specified project within the
         organization in the JWT token.
       operationId: ImportOpenAPI
       tags:
-        - APIs
+        - REST APIs
+        - Imports
       requestBody:
         description: OpenAPI import details
         required: true
@@ -350,7 +351,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/API'
+                $ref: '#/components/schemas/RESTAPI'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -367,11 +368,12 @@ paths:
       summary: Import API project
       description: |
         Imports an API project into the platform from a provided Git Repository URL.
-        An API is created from the imported API project and is associated with a specified project within the
+        A REST API is created from the imported API project and is associated with a specified project within the
         organization in the JWT token.
       operationId: ImportAPIProject
       tags:
-        - APIs
+        - REST APIs
+        - Imports
       requestBody:
         description: API project import details
         required: true
@@ -385,7 +387,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/API'
+                $ref: '#/components/schemas/RESTAPI'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -397,24 +399,24 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis:
+  /rest-apis:
     get:
-      summary: Get all APIs for an organization
+      summary: Get all REST APIs for an organization
       description: |
-        Retrieves all APIs belonging to an organization. Optionally filter by project using 
+        Retrieves all REST APIs belonging to an organization. Optionally filter by project using 
         the projectId query parameter. Access is validated against the organization in the JWT token.
-      operationId: ListAPIs
+      operationId: ListRESTAPIs
       tags:
-        - APIs
+        - REST APIs
       parameters:
         - $ref: '#/components/parameters/projectId-Q'
       responses:
         '200':
-          description: APIs retrieved successfully
+          description: REST APIs retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIListResponse'
+                $ref: '#/components/schemas/RESTAPIListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -424,19 +426,19 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
-      summary: Create a new API
+      summary: Create a new REST API
       description: |
-        Creates a new API in the platform. The API is associated with a project, which must 
+        Creates a new REST API in the platform. The API is associated with a project, which must 
         belong to the organization specified in the JWT token.
-      operationId: CreateAPI
+      operationId: CreateRESTAPI
       tags:
-        - APIs
+        - REST APIs
       requestBody:
         description: API object that needs to be added
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateAPIRequest'
+              $ref: '#/components/schemas/CreateRESTAPIRequest'
         required: true
       responses:
         '201':
@@ -444,7 +446,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/API'
+                $ref: '#/components/schemas/RESTAPI'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -456,24 +458,24 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis/{apiId}:
+  /rest-apis/{apiId}:
     get:
-      summary: Get API by UUID
+      summary: Get REST API by UUID
       description: |
         Retrieves a specific API by its UUID. Access is validated against the organization 
         in the JWT token.
-      operationId: GetAPI
+      operationId: GetRESTAPI
       tags:
-        - APIs
+        - REST APIs
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
       responses:
         '200':
           description: API retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/API'
+                $ref: '#/components/schemas/RESTAPI'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -484,29 +486,29 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
     put:
-      summary: Update API
+      summary: Update REST API
       description: |
         Updates an existing API's details. Access is validated against the organization 
         in the JWT token.
-      operationId: UpdateAPI
+      operationId: UpdateRESTAPI
       tags:
-        - APIs
+        - REST APIs
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
       requestBody:
         description: API object that needs to be updated
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateAPIRequest'
+              $ref: '#/components/schemas/UpdateRESTAPIRequest'
       responses:
         '200':
           description: API updated successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/API'
+                $ref: '#/components/schemas/RESTAPI'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -519,15 +521,15 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
     delete:
-      summary: Delete API
+      summary: Delete REST API
       description: |
         Deletes a specific API by its UUID. Access is validated against the organization 
         in the JWT token.
-      operationId: DeleteAPI
+      operationId: DeleteRESTAPI
       tags:
-        - APIs
+        - REST APIs
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
       responses:
         '204':
           description: API deleted successfully
@@ -541,26 +543,26 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
 
-  /apis/{apiId}/gateways:
+  /rest-apis/{apiId}/gateways:
     get:
-      summary: Get gateways for API
+      summary: Get gateways for REST API
       description: |
         Retrieves all gateways associated with the specified API, including deployment details.
         Returns gateway information along with association timestamps and deployment status.
         Access is validated against the organization in the JWT token.
-      operationId: GetAPIGateways
+      operationId: GetRESTAPIGateways
       tags:
-        - APIs
+        - REST APIs
         - Gateways
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
       responses:
         '200':
           description: List of gateways associated with the API, including deployment details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIGatewayListResponse'
+                $ref: '#/components/schemas/RESTAPIGatewayListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -571,7 +573,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
     post:
-      summary: Add gateways for API
+      summary: Add gateways for REST API
       description: |
         Associates gateways to the specified API. If gateways are already associated,
         updates the association timestamp. Returns all gateways associated with the API
@@ -579,10 +581,10 @@ paths:
         in the JWT token.
       operationId: AddGatewaysToAPI
       tags:
-        - APIs
+        - REST APIs
         - Gateways
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
       requestBody:
         description: List of gateways to associate with the API
         content:
@@ -590,14 +592,14 @@ paths:
             schema:
               type: array
               items:
-                $ref: '#/components/schemas/AddGatewayToAPIRequest'
+                $ref: '#/components/schemas/AddGatewayToRESTAPIRequest'
       responses:
         '200':
           description: List of all gateways associated with the API, including deployment details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIGatewayListResponse'
+                $ref: '#/components/schemas/RESTAPIGatewayListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -607,17 +609,145 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis/{apiId}/devportals/publish:
+  /rest-apis/{apiId}/api-keys:
     post:
-      summary: Publish API to DevPortal
+      summary: Create API key
       description: |
-        Publishes an existing API from platform-api to the configured DevPortal.
-      operationId: PublishAPIToDevPortal
+        Creates a new API key for the specified API. The API key will be hashed before
+        storage and broadcasted to all gateways where the API is deployed. This endpoint
+        allows external platforms to inject API keys to hybrid gateways.
+      operationId: CreateAPIKey
+      tags:
+        - REST APIs
+        - API Keys
+      parameters:
+        - $ref: '#/components/parameters/apiId'
+      requestBody:
+        description: API key creation request
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAPIKeyRequest'
+      responses:
+        '201':
+          description: API key created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateAPIKeyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Service Unavailable - No gateway connections available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rest-apis/{apiId}/api-keys/{keyName}:
+    put:
+      summary: Update API key
+      description: |
+        Updates an existing API key for the specified API. The new API key value will
+        be hashed before storage and broadcasted to all gateways where the API is deployed.
+        This endpoint allows external platforms to rotate API keys on hybrid gateways.
+      operationId: UpdateAPIKey
+      tags:
+        - REST APIs
+        - API Keys
+      parameters:
+        - $ref: '#/components/parameters/apiId'
+        - name: keyName
+          in: path
+          required: true
+          description: The unique name/identifier of the API key
+          schema:
+            type: string
+          example: "my-api-key"
+      requestBody:
+        description: API key update request
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAPIKeyRequest'
+      responses:
+        '200':
+          description: API key updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateAPIKeyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Service Unavailable - No gateway connections available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      summary: Revoke API key
+      description: |
+        Revokes an API key for the specified API. The revocation will be broadcasted
+        to all gateways where the API is deployed. This endpoint allows external platforms
+        to revoke API keys on hybrid gateways.
+      operationId: RevokeAPIKey
       tags:
         - APIs
+        - API Keys
+      parameters:
+        - $ref: '#/components/parameters/apiId'
+        - name: keyName
+          in: path
+          required: true
+          description: The unique name/identifier of the API key to revoke
+          schema:
+            type: string
+          example: "my-api-key"
+      responses:
+        '204':
+          description: API key revoked successfully (no content)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Service Unavailable - No gateway connections available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rest-apis/{apiId}/devportals/publish:
+    post:
+      summary: Publish REST API to DevPortal
+      description: |
+        Publishes an existing API from platform-api to the configured DevPortal.
+      operationId: PublishRESTAPIToDevPortal
+      tags:
+        - REST APIs
         - DevPortal
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
       requestBody:
         description: API publishing details
         required: true
@@ -680,17 +810,17 @@ paths:
                 message: Service Unavailable
                 description: Failed to reach DevPortal after 3 retry attempts (total 60 seconds)
 
-  /apis/{apiId}/devportals/unpublish:
+  /rest-apis/{apiId}/devportals/unpublish:
     post:
-      summary: Unpublish API from DevPortal
+      summary: Unpublish REST API from DevPortal
       description: |
         Removes an API from the configured DevPortal.
-      operationId: UnpublishAPIFromDevPortal
+      operationId: UnpublishRESTAPIFromDevPortal
       tags:
-        - APIs
+        - REST APIs
         - DevPortal
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
       requestBody:
         description: API unpublishing details
         required: true
@@ -732,24 +862,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /apis/{apiId}/publications:
+  /rest-apis/{apiId}/publications:
     get:
-      summary: Get API publications
+      summary: Get REST API publications
       description: |
         Retrieves all DevPortals associated with an API including publication details.
-      operationId: GetAPIPublications
+      operationId: GetRESTAPIPublications
       tags:
-        - APIs
+        - REST APIs
         - DevPortal
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
       responses:
         '200':
           description: API publications retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIDevPortalListResponse'
+                $ref: '#/components/schemas/RESTAPIDevPortalListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -761,16 +891,16 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis/validate:
+  /rest-apis/validate:
     get:
-      summary: Validate API identifier, name and version uniqueness within an organization
+      summary: Validate REST API identifier, name and version uniqueness within an organization
       description: |
         Validates if an API with the given identifier exists in an organization and if an API with the given name and 
         version combination exists within an organization. Either provide an identifier OR a combination of name and
         version as query parameters. Organization ID is automatically extracted from the JWT token.
-      operationId: ValidateAPI
+      operationId: ValidateRESTAPI
       tags:
-        - APIs
+        - REST APIs
       parameters:
         - $ref: '#/components/parameters/api-identifier-Q'
         - $ref: '#/components/parameters/api-name-Q'
@@ -781,7 +911,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIValidationResponse'
+                $ref: '#/components/schemas/RESTAPIValidationResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -789,9 +919,9 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis/{apiId}/deploy:
+  /rest-apis/{apiId}/deployments:
     post:
-      summary: Deploy API to gateway
+      summary: Create and deploy a new deployment
       description: |
         Creates an immutable deployment artifact for an API and deploys it to a specified gateway.
         Each deployment targets a single gateway. The apiId parameter is the API handle (identifier),
@@ -799,16 +929,16 @@ paths:
         Access is validated against the organization in the JWT token.
       operationId: DeployAPI
       tags:
-        - API Deployments
+        - REST API Deployments
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
       requestBody:
         description: Deployment request with gateway ID, base reference, and metadata
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeployAPIRequest'
+              $ref: '#/components/schemas/DeployRequest'
       responses:
         '201':
           description: API deployed successfully
@@ -817,26 +947,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeploymentResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: Bad Request. Validation errors (missing name, base, gatewayId, or API has no backend services)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Not Found. API, gateway, or base deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis/{apiId}/deployments:
     get:
-      summary: Get deployments for an API
+      summary: Get deployments for a REST API
       description: |
         Retrieves all deployment artifacts for a specific API. The apiId parameter is the API handle (identifier),
         not the UUID. Supports filtering by gateway UUID and deployment status. 
         Access is validated against the organization in the JWT token.
       operationId: GetDeployments
       tags:
-        - API Deployments
+        - REST API Deployments
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
         - $ref: '#/components/parameters/gatewayId-Q'
         - $ref: '#/components/parameters/deploymentStatus-Q'
       responses:
@@ -855,7 +992,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis/{apiId}/deployments/{deploymentId}:
+  /rest-apis/{apiId}/deployments/{deploymentId}:
     get:
       summary: Get deployment by ID
       description: |
@@ -863,9 +1000,9 @@ paths:
         and timestamps. Access is validated against the organization in the JWT token.
       operationId: GetDeployment
       tags:
-        - API Deployments
+        - REST API Deployments
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
         - $ref: '#/components/parameters/deploymentId'
       responses:
         '200':
@@ -887,9 +1024,9 @@ paths:
         Access is validated against the organization in the JWT token.
       operationId: DeleteDeployment
       tags:
-        - API Deployments
+        - REST API Deployments
       parameters:
-        - $ref: '#/components/parameters/apiID'
+        - $ref: '#/components/parameters/apiId'
         - $ref: '#/components/parameters/deploymentId'
       responses:
         '204':
@@ -905,51 +1042,34 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /apis/{apiId}/deployments/{deploymentId}/redeploy:
+  /rest-apis/{apiId}/deployments/undeploy:
     post:
-      summary: Redeploy deployment
+      summary: Undeploy deployment from gateway
       description: |
-        Redeploys an existing deployment artifact. If a previous deployment exists on the same gateway,
-        it will be automatically undeployed first. Access is validated against the organization 
-        in the JWT token.
-      operationId: RedeployDeployment
-      tags:
-        - API Deployments
-      parameters:
-        - $ref: '#/components/parameters/apiID'
-        - $ref: '#/components/parameters/deploymentId'
-      responses:
-        '200':
-          description: Deployment redeployed successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeploymentResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-  /apis/{apiId}/deployments/{deploymentId}/undeploy:
-    post:
-      summary: Undeploy deployment
-      description: |
-        Undeploys an active deployment, stopping the API from being served. The deployment artifact
-        remains in the system with UNDEPLOYED status and can be redeployed later. Returns the updated
-        deployment object with status changed to UNDEPLOYED. Access is validated against the organization 
-        in the JWT token.
+        Undeploys an active deployment, stopping the API from being served on the specified gateway.
+        The deployment artifact remains in the system with UNDEPLOYED status and can be restored later.
+        Returns the updated deployment object with status changed to UNDEPLOYED.
+        
+        Both deploymentId and gatewayId are required for safety. The backend validates that the 
+        deployment's bound gateway matches the provided gatewayId to prevent unintended operations.
+        Access is validated against the organization in the JWT token.
       operationId: UndeployDeployment
       tags:
-        - API Deployments
+        - REST API Deployments
       parameters:
-        - $ref: '#/components/parameters/apiID'
-        - $ref: '#/components/parameters/deploymentId'
+        - $ref: '#/components/parameters/apiId'
+        - name: deploymentId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the deployment to undeploy
+        - name: gatewayId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the gateway (validated against deployment's bound gateway)
       responses:
         '200':
           description: Deployment undeployed successfully. Returns the updated deployment with UNDEPLOYED status.
@@ -965,6 +1085,56 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rest-apis/{apiId}/deployments/restore:
+    post:
+      summary: Restore a previous deployment
+      description: |
+        Activates a previous deployment (ARCHIVED or UNDEPLOYED) by setting it as the current DEPLOYED version
+        on the specified gateway. This operation changes the deployment state of the API on that gateway.
+        The target deployment must not already be in DEPLOYED status.
+        
+        Both deploymentId and gatewayId are required for safety. The backend validates that the 
+        deployment's bound gateway matches the provided gatewayId to prevent unintended operations.
+        Access is validated against the organization in the JWT token.
+      operationId: RestoreDeployment
+      tags:
+        - REST API Deployments
+      parameters:
+        - $ref: '#/components/parameters/apiId'
+        - name: deploymentId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the deployment to restore (must be ARCHIVED or UNDEPLOYED)
+        - name: gatewayId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the gateway (validated against deployment's bound gateway)
+      responses:
+        '200':
+          description: Deployment restored successfully. Returns the deployment with status changed to DEPLOYED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict. Cannot restore currently deployed deployment or deployment is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1133,6 +1303,31 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /gateways/{gatewayId}/tokens:
+    get:
+      summary: List active gateway tokens
+      description: |
+        Returns all active tokens for the specified gateway. Token hashes and salts are never exposed.
+        Access is validated against the organization in the JWT token.
+      operationId: listGatewayTokens
+      tags:
+        - Gateway Tokens
+      parameters:
+        - $ref: '#/components/parameters/GatewayID'
+      responses:
+        '200':
+          description: List of active tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TokenInfoResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     post:
       summary: Rotate gateway token
       description: |
@@ -1677,6 +1872,1158 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /llm-provider-templates:
+    post:
+      summary: Create a new LLM provider template
+      description: |
+        Creates a new LLM provider template within the organization.
+        Organization is identified via the JWT token.
+      operationId: createLLMProviderTemplate
+      tags:
+        - LLM Provider Templates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMProviderTemplate'
+      responses:
+        '201':
+          description: LLM provider template created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: List all LLM provider templates
+      description: |
+        Retrieve a list of all LLM provider templates for the organization.
+      operationId: listLLMProviderTemplates
+      tags:
+        - LLM Provider Templates
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of LLM provider templates to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of LLM provider templates to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of LLM provider templates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderTemplateListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-provider-templates/{id}:
+    get:
+      summary: Get LLM provider template by id
+      description: Retrieve the complete configuration for a specific LLM provider template.
+      operationId: getLLMProviderTemplate
+      tags:
+        - LLM Provider Templates
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier for the LLM provider template
+          schema:
+            type: string
+          example: openai
+      responses:
+        '200':
+          description: LLM provider template details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderTemplate'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      summary: Update an existing LLM provider template
+      description: Update an existing LLM provider template configuration.
+      operationId: updateLLMProviderTemplate
+      tags:
+        - LLM Provider Templates
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the template to update
+          schema:
+            type: string
+          example: openai
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMProviderTemplate'
+      responses:
+        '200':
+          description: LLM provider template updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      summary: Delete an LLM provider template
+      description: Remove an LLM provider template.
+      operationId: deleteLLMProviderTemplate
+      tags:
+        - LLM Provider Templates
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the template to delete
+          schema:
+            type: string
+          example: openai
+      responses:
+        '204':
+          description: LLM provider template deleted successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-providers:
+    post:
+      summary: Create a new LLM provider
+      description: |
+        Deploy a new LLM provider configuration.
+      operationId: createLLMProvider
+      tags:
+        - LLM Providers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMProvider'
+            example:
+              id: wso2-openai-provider
+              name: WSO2 OpenAI Provider
+              version: v1.0
+              template: openai
+              upstream:
+                main:
+                  url: https://api.openai.com
+              accessControl:
+                mode: deny_all
+                exceptions:
+                  - path: /chat/completions
+                    methods: [ OPTIONS, PATCH ]
+              description: Primary OpenAI provider
+              context: /openai
+              vhost: api.openai.com
+              openapi: |-
+                openapi: 3.0.3
+                info:
+                  title: Provider API
+                  version: v1.0
+                paths: {}
+              modelProviders:
+                - id: openai
+                  name: OpenAI
+                  models:
+                    - id: gpt-4o-mini
+                      name: GPT-4o mini
+                      description: Cost-effective general model
+              rateLimiting:
+                providerLevel:
+                  global:
+                    request:
+                      enabled: true
+                      count: 1500
+                      reset:
+                        duration: 2
+                        unit: week
+                    token:
+                      enabled: true
+                      count: 1000000
+                      reset:
+                        duration: 1
+                        unit: month
+      responses:
+        '201':
+          description: LLM provider created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProvider'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: List all LLM providers
+      description: Retrieve a list of all LLM providers.
+      operationId: listLLMProviders
+      tags:
+        - LLM Providers
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of LLM providers to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of LLM providers to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of LLM providers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-providers/{id}:
+    get:
+      summary: Get LLM provider by identifier
+      description: Retrieve the complete configuration for a specific LLM provider.
+      operationId: getLLMProvider
+      tags:
+        - LLM Providers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+      responses:
+        '200':
+          description: LLM provider details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProvider'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      summary: Update an existing LLM provider
+      description: Update the configuration of an existing LLM provider.
+      operationId: updateLLMProvider
+      tags:
+        - LLM Providers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMProvider'
+      responses:
+        '200':
+          description: LLM provider updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProvider'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      summary: Delete an LLM provider
+      description: Remove an LLM provider.
+      operationId: deleteLLMProvider
+      tags:
+        - LLM Providers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+      responses:
+        '204':
+          description: LLM provider deleted successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-providers/{id}/deployments:
+    post:
+      summary: Create and deploy a new LLM provider deployment
+      description: |
+        Creates an immutable deployment artifact for an LLM provider and deploys it to a specified gateway.
+        Each deployment targets a single gateway. The providerId parameter is the LLM provider handle (identifier),
+        not the UUID. The deployment becomes active immediately on the target gateway.
+        Access is validated against the organization in the JWT token.
+      operationId: deployLLMProvider
+      tags:
+        - LLM Provider Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+      requestBody:
+        description: Deployment request with gateway ID, base reference, and metadata
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployRequest'
+      responses:
+        '201':
+          description: LLM provider deployed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+        '400':
+          description: Bad Request. Validation errors (missing name, base, gatewayId, or invalid input)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Not Found. LLM provider, gateway, or base deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: Get deployments for an LLM provider
+      description: |
+        Retrieves all deployment artifacts for a specific LLM provider. The providerId parameter is the
+        LLM provider handle (identifier), not the UUID. Supports filtering by gateway UUID and deployment status.
+        Access is validated against the organization in the JWT token.
+      operationId: getLLMProviderDeployments
+      tags:
+        - LLM Provider Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+        - $ref: '#/components/parameters/gatewayId-Q'
+        - $ref: '#/components/parameters/deploymentStatus-Q'
+      responses:
+        '200':
+          description: Deployments retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-providers/{id}/deployments/{deploymentId}:
+    get:
+      summary: Get LLM provider deployment by ID
+      description: |
+        Retrieves metadata for a specific LLM provider deployment artifact including status, gateway association,
+        and timestamps. Access is validated against the organization in the JWT token.
+      operationId: getLLMProviderDeployment
+      tags:
+        - LLM Provider Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+        - $ref: '#/components/parameters/deploymentId'
+      responses:
+        '200':
+          description: Deployment metadata retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      summary: Delete LLM provider deployment
+      description: |
+        Deletes a deployment artifact. Deletion is only allowed when the deployment is in UNDEPLOYED status.
+        Access is validated against the organization in the JWT token.
+      operationId: deleteLLMProviderDeployment
+      tags:
+        - LLM Provider Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+        - $ref: '#/components/parameters/deploymentId'
+      responses:
+        '204':
+          description: Deployment deleted successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-providers/{id}/deployments/undeploy:
+    post:
+      summary: Undeploy LLM provider deployment from gateway
+      description: |
+        Undeploys an active LLM provider deployment, stopping it from being served on the specified gateway.
+        The deployment artifact remains in the system with UNDEPLOYED status and can be restored later.
+        Returns the updated deployment object with status changed to UNDEPLOYED.
+
+        Both deploymentId and gatewayId are required for safety. The backend validates that the
+        deployment's bound gateway matches the provided gatewayId to prevent unintended operations.
+        Access is validated against the organization in the JWT token.
+      operationId: undeployLLMProviderDeployment
+      tags:
+        - LLM Provider Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+        - name: deploymentId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the deployment to undeploy
+        - name: gatewayId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the gateway (validated against deployment's bound gateway)
+      responses:
+        '200':
+          description: Deployment undeployed successfully. Returns the updated deployment with UNDEPLOYED status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-providers/{id}/deployments/restore:
+    post:
+      summary: Restore a previous LLM provider deployment
+      description: |
+        Activates a previous deployment (ARCHIVED or UNDEPLOYED) by setting it as the current DEPLOYED version
+        on the specified gateway. This operation changes the deployment state of the LLM provider on that gateway.
+        The target deployment must not already be in DEPLOYED status.
+
+        Both deploymentId and gatewayId are required for safety. The backend validates that the
+        deployment's bound gateway matches the provided gatewayId to prevent unintended operations.
+        Access is validated against the organization in the JWT token.
+      operationId: restoreLLMProviderDeployment
+      tags:
+        - LLM Provider Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+        - name: deploymentId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the deployment to restore (must be ARCHIVED or UNDEPLOYED)
+        - name: gatewayId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the gateway (validated against deployment's bound gateway)
+      responses:
+        '200':
+          description: Deployment restored successfully. Returns the deployment with status changed to DEPLOYED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict. Cannot restore currently deployed deployment or deployment is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-proxies/{id}/deployments:
+    post:
+      summary: Create and deploy a new LLM proxy deployment
+      description: |
+        Creates an immutable deployment artifact for an LLM proxy and deploys it to a specified gateway.
+        Each deployment targets a single gateway. The proxyId parameter is the LLM proxy handle (identifier),
+        not the UUID. The deployment becomes active immediately on the target gateway.
+        Access is validated against the organization in the JWT token.
+      operationId: deployLLMProxy
+      tags:
+        - LLM Proxy Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+      requestBody:
+        description: Deployment request with gateway ID, base reference, and metadata
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployRequest'
+      responses:
+        '201':
+          description: LLM proxy deployed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+        '400':
+          description: Bad Request. Validation errors (missing name, base, gatewayId, or invalid input)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Not Found. LLM proxy, gateway, or base deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: Get deployments for an LLM proxy
+      description: |
+        Retrieves all deployment artifacts for a specific LLM proxy. The proxyId parameter is the
+        LLM proxy handle (identifier), not the UUID. Supports filtering by gateway UUID and deployment status.
+        Access is validated against the organization in the JWT token.
+      operationId: getLLMProxyDeployments
+      tags:
+        - LLM Proxy Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+        - $ref: '#/components/parameters/gatewayId-Q'
+        - $ref: '#/components/parameters/deploymentStatus-Q'
+      responses:
+        '200':
+          description: Deployments retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-proxies/{id}/deployments/{deploymentId}:
+    get:
+      summary: Get LLM proxy deployment by ID
+      description: |
+        Retrieves metadata for a specific LLM proxy deployment artifact including status, gateway association,
+        and timestamps. Access is validated against the organization in the JWT token.
+      operationId: getLLMProxyDeployment
+      tags:
+        - LLM Proxy Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+        - $ref: '#/components/parameters/deploymentId'
+      responses:
+        '200':
+          description: Deployment metadata retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      summary: Delete LLM proxy deployment
+      description: |
+        Deletes a deployment artifact. Deletion is only allowed when the deployment is in UNDEPLOYED status.
+        Access is validated against the organization in the JWT token.
+      operationId: deleteLLMProxyDeployment
+      tags:
+        - LLM Proxy Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+        - $ref: '#/components/parameters/deploymentId'
+      responses:
+        '204':
+          description: Deployment deleted successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-proxies/{id}/deployments/undeploy:
+    post:
+      summary: Undeploy LLM proxy deployment from gateway
+      description: |
+        Undeploys an active LLM proxy deployment, stopping it from being served on the specified gateway.
+        The deployment artifact remains in the system with UNDEPLOYED status and can be restored later.
+        Returns the updated deployment object with status changed to UNDEPLOYED.
+
+        Both deploymentId and gatewayId are required for safety. The backend validates that the
+        deployment's bound gateway matches the provided gatewayId to prevent unintended operations.
+        Access is validated against the organization in the JWT token.
+      operationId: undeployLLMProxyDeployment
+      tags:
+        - LLM Proxy Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+        - name: deploymentId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the deployment to undeploy
+        - name: gatewayId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the gateway (validated against deployment's bound gateway)
+      responses:
+        '200':
+          description: Deployment undeployed successfully. Returns the updated deployment with UNDEPLOYED status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-proxies/{id}/deployments/restore:
+    post:
+      summary: Restore a previous LLM proxy deployment
+      description: |
+        Activates a previous deployment (ARCHIVED or UNDEPLOYED) by setting it as the current DEPLOYED version
+        on the specified gateway. This operation changes the deployment state of the LLM proxy on that gateway.
+        The target deployment must not already be in DEPLOYED status.
+
+        Both deploymentId and gatewayId are required for safety. The backend validates that the
+        deployment's bound gateway matches the provided gatewayId to prevent unintended operations.
+        Access is validated against the organization in the JWT token.
+      operationId: restoreLLMProxyDeployment
+      tags:
+        - LLM Proxy Deployments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+        - name: deploymentId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the deployment to restore (must be ARCHIVED or UNDEPLOYED)
+        - name: gatewayId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: UUID of the gateway (validated against deployment's bound gateway)
+      responses:
+        '200':
+          description: Deployment restored successfully. Returns the deployment with status changed to DEPLOYED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict. Cannot restore currently deployed deployment or deployment is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-providers/{id}/llm-proxies:
+    get:
+      summary: List LLM proxies by provider
+      description: Retrieve a list of LLM proxies that use the specified LLM provider.
+      operationId: listLLMProxiesByProvider
+      tags:
+        - LLM Providers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of LLM proxies to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of LLM proxies to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of LLM proxies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProxyListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-providers/{id}/api-keys:
+    post:
+      summary: Create a new API key for an LLM provider
+      description: |
+        Generates a new API key for the specified LLM provider. The generated key
+        is broadcasted to all gateways in the organization and can be used to
+        authenticate requests to the LLM provider when API key validation is enabled.
+      operationId: createLLMProviderAPIKey
+      tags:
+        - LLM Providers
+        - API Keys
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM provider
+          schema:
+            type: string
+          example: wso2-openai-provider
+      requestBody:
+        description: API key creation details
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLLMProviderAPIKeyRequest'
+      responses:
+        '201':
+          description: API key created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateLLMProviderAPIKeyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: LLM provider not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: No gateway connections available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-proxies:
+    post:
+      summary: Create a new LLM proxy
+      description: |
+        Deploy a new LLM proxy configuration.
+      operationId: createLLMProxy
+      tags:
+        - LLM Proxies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMProxy'
+      responses:
+        '201':
+          description: LLM proxy created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProxy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: List all LLM proxies
+      description: Retrieve a list of all LLM proxies. Optionally filter by project using the projectId query parameter.
+      operationId: listLLMProxies
+      tags:
+        - LLM Proxies
+      parameters:
+        - $ref: '#/components/parameters/projectId-Q'
+        - name: limit
+          in: query
+          description: Maximum number of LLM proxies to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of LLM proxies to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of LLM proxies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProxyListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-proxies/{id}:
+    get:
+      summary: Get LLM proxy by unique identifier
+      description: Retrieve the complete configuration for a specific LLM proxy.
+      operationId: getLLMProxy
+      tags:
+        - LLM Proxies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+      responses:
+        '200':
+          description: LLM proxy details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProxy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      summary: Update an existing LLM proxy
+      description: Update the configuration of an existing LLM proxy.
+      operationId: updateLLMProxy
+      tags:
+        - LLM Proxies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMProxy'
+      responses:
+        '200':
+          description: LLM proxy updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProxy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      summary: Delete an LLM proxy
+      description: Remove an LLM proxy.
+      operationId: deleteLLMProxy
+      tags:
+        - LLM Proxies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+      responses:
+        '204':
+          description: LLM proxy deleted successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /llm-proxies/{id}/api-keys:
+    post:
+      summary: Create a new API key for an LLM proxy
+      description: |
+        Generates a new API key for the specified LLM proxy. The generated key
+        is broadcasted to all gateways in the organization and can be used to
+        authenticate requests to the LLM proxy when API key validation is enabled.
+      operationId: createLLMProxyAPIKey
+      tags:
+        - LLM Proxies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the LLM proxy
+          schema:
+            type: string
+          example: wso2-openai-proxy
+      requestBody:
+        description: API key creation details
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLLMProxyAPIKeyRequest'
+      responses:
+        '201':
+          description: API key created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateLLMProxyAPIKeyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: LLM proxy not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: No gateway connections available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
   securitySchemes:
     BearerAuth:
@@ -1809,22 +3156,23 @@ components:
           readOnly: true
           example: "2023-10-12T10:30:00Z"
 
-    API:
+    RESTAPI:
       title: API object
       required:
         - name
         - context
         - version
         - projectId
-        - organizationId
+        - upstream
       type: object
       properties:
         id:
           type: string
           description: Unique handle/identifier for the API. Can be provided during creation or auto-generated.
-          example: my-api-handle
+          example: my-rest-api-handle
         name:
           minLength: 1
+          description: Display name of the API
           pattern: '(^[^~!@#;:%^*()+={}|\\<>"'',&$\[\]\/]*$)'
           type: string
           example: PizzaShackAPI
@@ -1843,23 +3191,17 @@ components:
           type: string
           pattern: '^[^~!@#;:%^*()+={}|\\<>"'',&/$\[\]\s+\/]+$'
           example: 1.0.0
-        provider:
+        createdBy:
           maxLength: 200
           type: string
           description: |
-            If the provider value is not given user invoking the api will be used as the provider.
+            If the createdBy value is not given user invoking the api will be used as the createdBy.
           example: admin
         projectId:
           type: string
           format: uuid
           description: ID of the project this API belongs to
           example: yr434567-de34-76uj6-w376-234324532
-        organizationId:
-          type: string
-          format: uuid
-          description: ID of the organization this API belongs to
-          readOnly: true
-          example: 123e4567-e89b-12d3-a456-426614174000
         createdAt:
           type: string
           format: date-time
@@ -1872,6 +3214,8 @@ components:
           readOnly: true
           description: Timestamp when the api was last updated
           example: "2023-10-12T10:30:00Z"
+        upstream:
+          $ref: "#/components/schemas/Upstream"
         lifeCycleStatus:
           type: string
           description: Current lifecycle status of the API
@@ -1883,28 +3227,11 @@ components:
             - RETIRED
             - BLOCKED
           example: "CREATED"
-        hasThumbnail:
-          type: boolean
-          example: false
-        isDefaultVersion:
-          type: boolean
-          example: false
-        type:
+        kind:
           type: string
-          description: The api creation type to be used. Accepted values are HTTP,
-            WS, SOAPTOREST, GRAPHQL, WEBSUB, SSE, WEBHOOK, ASYNC
-          example: HTTP/REST
-          default: HTTP/REST
-          enum:
-            - HTTP
-            - WS
-            - SOAPTOREST
-            - SOAP
-            - GRAPHQL
-            - WEBSUB
-            - SSE
-            - WEBHOOK
-            - ASYNC
+          description: Kind of the API based on its communication protocol or architectural style
+          example: RestApi
+          default: RestApi
         transport:
           type: array
           description: |
@@ -1914,19 +3241,11 @@ components:
             - https
           items:
             type: string
-        mtls:
-          $ref: '#/components/schemas/MTLSConfig'
-        security:
-          $ref: '#/components/schemas/SecurityConfig'
-        cors:
-          $ref: '#/components/schemas/CORSConfig'
-        backend-services:
+        policies:
           type: array
-          description: List of backend services used by this API
+          description: List of policies to be applied on the API
           items:
-            $ref: '#/components/schemas/BackendService'
-        api-rate-limiting:
-          $ref: '#/components/schemas/RateLimitingConfig'
+            $ref: '#/components/schemas/Policy'
         operations:
           type: array
           description: List of operations exposed by this API
@@ -1937,36 +3256,7 @@ components:
           description: List of channels exposed by this API
           items:
             $ref: '#/components/schemas/Channel'
-    MTLSConfig:
-      title: mTLS Configuration
-      type: object
-      description: Configuration for mutual TLS settings for the API
-      properties:
-        enabled:
-          type: boolean
-          description: Whether mutual TLS is enabled
-          example: false
-        enforceIfClientCertPresent:
-          type: boolean
-          description: Whether to enforce mTLS if a client certificate is present
-          example: false
-        verifyClient:
-          type: boolean
-          description: Whether client verification is enabled
-          example: false
-        clientCert:
-          type: string
-          description: Base64-encoded client certificate
-          example: "MIIDdTCCAl2gAwIBAgIUOQp4tDq2YVfB4KxwA3kM3G4x7eowDQYJKoZIhvcNAQELBQAwRjELMAkGA1UEBhMCVVMxCzAJBgNVBA"
-        clientKey:
-          type: string
-          description: Base64-encoded client private key
-          example: "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDOn1Q3xNQHRb7KmFwB6Y6L6K2B8rwRUKR6dW6iBzF7QdtsdQ"
-        caCert:
-          type: string
-          description: Base64-encoded certificate authority (CA) certificate
-          example: "MIIDrzCCApegAwIBAgIUYJzYpJ2Vj3iO6l3P2wq+1O1bS9EwDQYJKoZIhvcNAQELBQAwcDELMAkGA1UEBhMCVVMxCzAJBgNVBAg"
-
+  
     SecurityConfig:
       title: Security Configuration
       description: Defines security mechanisms (API key, OAuth2) applicable to the API
@@ -1978,305 +3268,34 @@ components:
           example: true
         apiKey:
           $ref: '#/components/schemas/APIKeySecurity'
-        oauth2:
-          $ref: '#/components/schemas/OAuth2Security'
 
     APIKeySecurity:
       title: API Key Security
-      description: Configuration for API key–based authentication
+      description: Configuration for API key based authentication
       type: object
       properties:
         enabled:
           type: boolean
           description: Whether API key authentication is enabled
           example: true
-        header:
+        key:
           type: string
-          description: Header name to carry the API key
-          example: "api-key"
-        query:
+          description: Name of the header or query parameter to be used for the API key
+          example: "X-API-Key"
+        in:
           type: string
-          description: Query parameter name to carry the API key
-          example: "api-key"
-        cookie:
-          type: string
-          description: Cookie name to carry the API key
-          example: "api-key"
-
-    OAuth2Security:
-      title: OAuth2 Security
-      description: Configuration for OAuth 2.0 authentication
-      type: object
-      properties:
-        grantTypes:
-          $ref: '#/components/schemas/OAuth2GrantTypes'
-        scopes:
-          type: array
-          description: OAuth2 scopes required for this API
-          items:
-            type: string
-          example:
-            - openid
-            - profile
-            - email
-
-    OAuth2GrantTypes:
-      title: OAuth2 Grant Types
-      description: Supported OAuth2 grant types for this API
-      type: object
-      properties:
-        authorizationCode:
-          $ref: '#/components/schemas/AuthorizationCodeGrant'
-        implicit:
-          $ref: '#/components/schemas/ImplicitGrant'
-        password:
-          $ref: '#/components/schemas/PasswordGrant'
-        clientCredentials:
-          $ref: '#/components/schemas/ClientCredentialsGrant'
-
-    AuthorizationCodeGrant:
-      title: OAuth2 Grant Type with Callback
-      description: Defines an OAuth2 grant type that uses a callback URL
-      type: object
-      properties:
-        enabled:
-          type: boolean
-          description: Whether this grant type is enabled
-          example: true
-        callbackUrl:
-          type: string
-          description: Callback URL for OAuth2 authorization flow
-          example: http://localhost:8080/oauth2/callback
-
-    ImplicitGrant:
-      title: OAuth2 Grant Type with Callback
-      description: Defines an OAuth2 grant type that uses a callback URL
-      type: object
-      properties:
-        enabled:
-          type: boolean
-          description: Whether this grant type is enabled
-          example: false
-        callbackUrl:
-          type: string
-          description: Callback URL for OAuth2 authorization flow
-          example: http://localhost:8080/oauth2/callback
-
-    PasswordGrant:
-      title: Password OAuth2 Grant Type
-      description: Defines an Password OAuth2 grant type without a callback URL
-      type: object
-      properties:
-        enabled:
-          type: boolean
-          description: Whether grant type is enabled
-          example: false
-
-    ClientCredentialsGrant:
-      title: Client Credentials OAuth2 Grant Type
-      description: Defines Client Credentials OAuth2 grant type without a callback URL
-      type: object
-      properties:
-        enabled:
-          type: boolean
-          description: Whether grant type is enabled
-          example: false
-
-    CORSConfig:
-      title: CORS Configuration
-      description: Defines Cross-Origin Resource Sharing (CORS) policy for the API
-      type: object
-      properties:
-        enabled:
-          type: boolean
-          description: Whether CORS is enabled
-          example: true
-        allowOrigins:
-          type: string
-          description: Comma-separated list of allowed origins
-          example: "*"
-        allowMethods:
-          type: string
-          description: Comma-separated list of allowed HTTP methods
-          example: "GET,PUT,POST,DELETE,HEAD,OPTIONS"
-        allowHeaders:
-          type: string
-          description: Comma-separated list of allowed HTTP headers
-          example: "Authorization,Access-Control-Allow-Origin,Content-Type,SOAPAction"
-        exposeHeaders:
-          type: string
-          description: Headers that can be exposed to the browser
-          example: ""
-        maxAge:
-          type: integer
-          description: Maximum age (in seconds) for caching preflight requests
-          example: 3600
-        allowCredentials:
-          type: boolean
-          description: Whether credentials are allowed in CORS requests
-          example: false
-
-    BackendService:
-      title: Backend Service
-      description: Represents a backend service that handles requests for this API
-      type: object
-      properties:
-        name:
-          type: string
-          description: Name of the backend service
-          example: "default"
-        isDefault:
-          type: boolean
-          description: Whether this backend is the default one
-          example: true
-        endpoints:
-          type: array
-          description: List of endpoints in this backend service
-          items:
-            $ref: '#/components/schemas/BackendEndpoint'
-        timeout:
-          $ref: '#/components/schemas/TimeoutConfig'
-        retries:
-          type: integer
-          description: Number of retry attempts for failed requests
-          example: 3
-        loadBalance:
-          $ref: '#/components/schemas/LoadBalanceConfig'
-        circuitBreaker:
-          $ref: '#/components/schemas/CircuitBreakerConfig'
-
-    BackendEndpoint:
-      title: Backend Endpoint
-      type: object
-      description: Defines a single backend endpoint
-      properties:
-        url:
-          type: string
-          example: "https://petstore.swagger.io/v2"
-        description:
-          type: string
-          example: "Petstore API Endpoint"
-        healthCheck:
-          $ref: "#/components/schemas/HealthCheckConfig"
-        weight:
-          type: integer
-          example: 100
-        mtls:
-          $ref: "#/components/schemas/MTLSConfig"
-
-    HealthCheckConfig:
-      title: Health Check Configuration
-      type: object
-      description: Defines health check parameters for a backend endpoint
-      properties:
-        enabled:
-          type: boolean
-          example: true
-        interval:
-          type: integer
-          description: Health check interval in seconds
-          example: 60
-        timeout:
-          type: integer
-          description: Timeout in seconds for each health check attempt
-          example: 5
-        unhealthyThreshold:
-          type: integer
-          description: Number of failed checks before marking unhealthy
-          example: 3
-        healthyThreshold:
-          type: integer
-          description: Number of successful checks before marking healthy
-          example: 2
-
-    TimeoutConfig:
-      title: Timeout Configuration
-      type: object
-      description: Timeout settings for the backend connection
-      properties:
-        connect:
-          type: integer
-          description: Connection timeout in milliseconds
-          example: 5000
-        read:
-          type: integer
-          description: Read timeout in milliseconds
-          example: 60000
-        write:
-          type: integer
-          description: Write timeout in milliseconds
-          example: 60000
-
-    LoadBalanceConfig:
-      title: Load Balancing Configuration
-      type: object
-      description: Defines load balancing behavior for backend endpoints
-      properties:
-        algorithm:
-          type: string
-          description: Load balancing algorithm to use
-          example: "ROUND_ROBIN"
-        failover:
-          type: boolean
-          description: Whether to failover to another endpoint on failure
-          example: true
-
-    CircuitBreakerConfig:
-      title: Circuit Breaker Configuration
-      type: object
-      description: Circuit breaker settings to manage backend failures
-      properties:
-        enabled:
-          type: boolean
-          description: Whether circuit breaker is enabled
-          example: false
-        maxConnections:
-          type: integer
-          description: Maximum number of concurrent connections
-          example: 10
-        maxPendingRequests:
-          type: integer
-          description: Maximum number of pending requests
-          example: 5
-        maxRequests:
-          type: integer
-          description: Maximum number of requests in a given time window
-          example: 3
-        maxRetries:
-          type: integer
-          description: Maximum number of retries for a failed request
-          example: 1
-
-    RateLimitingConfig:
-      title: API Rate Limiting Configuration
-      type: object
-      description: Defines API rate limiting rules
-      properties:
-        enabled:
-          type: boolean
-          description: Whether rate limiting is enabled
-          example: true
-        rateLimitCount:
-          type: integer
-          description: Number of requests allowed in the specified time unit
-          example: 1000
-        rateLimitTimeUnit:
-          type: string
-          description: Time unit for rate limiting (second, minute, hour)
+          description: Location of the API key (header or query)
           enum:
-            - second
-            - minute
-            - hour
-          example: "minute"
-        stopOnQuotaReach:
-          type: boolean
-          description: Whether to stop requests when the quota is reached
-          example: true
-
+            - header
+            - query
+          example: "header"
+        
     Operation:
       title: API Operation
       type: object
       description: Defines a single operation (resource) within the API
+      required:
+        - request
       properties:
         name:
           type: string
@@ -2293,6 +3312,8 @@ components:
       title: Async API Channel
       type: object
       description: Defines a single channel within the Async API
+      required:
+        - request
       properties:
         name:
           type: string
@@ -2309,6 +3330,9 @@ components:
       title: Operation Request
       type: object
       description: Request details for an API operation
+      required:
+        - method
+        - path
       properties:
         method:
           type: string
@@ -2326,13 +3350,6 @@ components:
           type: string
           description: Resource path for the operation
           example: "/pet/{petId}"
-        backend-services:
-          type: array
-          description: List of backend services for this operation
-          items:
-            $ref: "#/components/schemas/BackendRouting"
-        authentication:
-          $ref: "#/components/schemas/AuthenticationConfig"
         policies:
           type: array
           description: List of policies to be applied on the operation
@@ -2343,6 +3360,9 @@ components:
       title: Channel Request
       type: object
       description: Request details for a channel within the Async API
+      required:
+        - method
+        - name
       properties:
         method:
           type: string
@@ -2354,48 +3374,11 @@ components:
           type: string
           description: Channel name for the event
           example: "issues"
-        backend-services:
-          type: array
-          description: List of backend services for this operation
-          items:
-            $ref: "#/components/schemas/BackendRouting"
-        authentication:
-          $ref: "#/components/schemas/AuthenticationConfig"
         policies:
           type: array
           description: List of policies to be applied on the operation
           items:
             $ref: "#/components/schemas/Policy"
-
-    BackendRouting:
-      title: Backend Routing
-      type: object
-      description: Defines routing weights to different backend services
-      properties:
-        name:
-          type: string
-          description: Name of the backend service
-          example: "default"
-        weight:
-          type: integer
-          description: Traffic weight for this backend service
-          example: 80
-
-    AuthenticationConfig:
-      title: Authentication Configuration
-      type: object
-      description: Defines authentication requirements for an operation
-      properties:
-        required:
-          type: boolean
-          description: Whether authentication is required
-          example: true
-        scopes:
-          type: array
-          description: List of OAuth2 scopes required for this operation
-          items:
-            type: string
-          example: [ "read:pets" ]
 
     Policy:
       title: Policy Configuration
@@ -2425,7 +3408,7 @@ components:
           description: Semantic version of the policy
           example: "1.0.0"
 
-    AddGatewayToAPIRequest:
+    AddGatewayToRESTAPIRequest:
       title: AddGatewayToAPIRequest object with basic gateway details
       type: object
       required:
@@ -2436,7 +3419,7 @@ components:
           format: uuid
           example: "987e6543-e21b-45d3-a789-426614174999"
 
-    APIGatewayListResponse:
+    RESTAPIGatewayListResponse:
       type: object
       required:
         - count
@@ -2451,11 +3434,11 @@ components:
           type: array
           description: List of gateways associated with the API, including deployment details when deployed
           items:
-            $ref: '#/components/schemas/APIGatewayResponse'
+            $ref: '#/components/schemas/RESTAPIGatewayResponse'
         pagination:
           $ref: '#/components/schemas/Pagination'
 
-    APIGatewayResponse:
+    RESTAPIGatewayResponse:
       type: object
       allOf:
         - $ref: '#/components/schemas/GatewayResponse'
@@ -2474,10 +3457,10 @@ components:
               description: Whether the API is currently deployed to this gateway
               example: true
             deployment:
-              $ref: '#/components/schemas/APIDeploymentDetails'
+              $ref: '#/components/schemas/RESTAPIDeploymentDetails'
               description: Deployment details (only present when isDeployed is true)
 
-    APIDeploymentDetails:
+    RESTAPIDeploymentDetails:
       type: object
       description: Details about API deployment to a specific gateway
       required:
@@ -2546,6 +3529,11 @@ components:
           description: Type of gateway functionality
           default: regular
           example: "regular"
+        properties:
+          type: object
+          additionalProperties: true
+          description: Custom key-value properties for the gateway
+          example: {"region": "us-west", "tier": "premium"}
 
     GatewayResponse:
       type: object
@@ -2572,6 +3560,11 @@ components:
           type: string
           description: Description of the gateway
           example: "Production gateway for handling API traffic"
+        properties:
+          type: object
+          additionalProperties: true
+          description: Custom key-value properties for the gateway
+          example: {"region": "us-west", "tier": "premium"}
         vhost:
           type: string
           description: Virtual host (domain name) for the gateway
@@ -2617,6 +3610,11 @@ components:
           type: boolean
           description: Whether the gateway is critical for production
           example: true
+        properties:
+          type: object
+          additionalProperties: true
+          description: Custom key-value properties for the gateway
+          example: {"region": "us-west", "tier": "premium"}
 
     Pagination:
       type: object
@@ -2716,7 +3714,7 @@ components:
         pagination:
           $ref: '#/components/schemas/Pagination'
 
-    APIListResponse:
+    RESTAPIListResponse:
       type: object
       required:
         - count
@@ -2730,7 +3728,7 @@ components:
         list:
           type: array
           items:
-            $ref: '#/components/schemas/API'
+            $ref: '#/components/schemas/RESTAPI'
         pagination:
           $ref: '#/components/schemas/Pagination'
 
@@ -2932,9 +3930,9 @@ components:
           description: Timestamp when token was revoked (null if active)
           example: null
 
-    CreateAPIRequest:
+    CreateRESTAPIRequest:
       allOf:
-        - $ref: '#/components/schemas/API'
+        - $ref: '#/components/schemas/RESTAPI'
         - type: object
           required:
             - name
@@ -2942,26 +3940,173 @@ components:
             - version
             - projectId
 
-    UpdateAPIRequest:
+    UpdateRESTAPIRequest:
       allOf:
-        - $ref: '#/components/schemas/API'
+        - $ref: '#/components/schemas/RESTAPI'
+
+    TimeUnit:
+      type: string
+      description: Time unit for API key expiration duration
+      enum:
+        - seconds
+        - minutes
+        - hours
+        - days
+        - weeks
+        - months
+      example: days
+
+    ExpirationDuration:
+      type: object
+      required:
+        - duration
+        - unit
+      properties:
+        duration:
+          type: integer
+          description: Duration value (must be positive)
+          minimum: 1
+          example: 30
+        unit:
+          $ref: '#/components/schemas/TimeUnit'
+
+    CreateAPIKeyRequest:
+      type: object
+      required:
+        - apiKey
+      properties:
+        name:
+          type: string
+          description: |
+            Unique identifier for this API key within the API (optional; if omitted,
+            generated from displayName)
+          example: "production-key-01"
+        displayName:
+          type: string
+          description: Display name of the API key
+          example: "Production API Key"
+        apiKey:
+          type: string
+          description: The plain text API key value that will be hashed before storage
+          example: "sk_example_1234567890abcdef"
+        externalRefId:
+          type: string
+          description: Optional reference ID for tracing purposes (from external platforms)
+          nullable: true
+          example: "ext-ref-12345"
+        operations:
+          type: string
+          description: |
+            Specifies which API operations this key can access. Use "*" for all operations.
+          default: "*"
+          example: "*"
+        expiresAt:
+          type: string
+          format: date-time
+          description: Optional expiration time in ISO 8601 format
+          nullable: true
+          example: "2026-12-31T23:59:59Z"
+
+    CreateAPIKeyResponse:
+      type: object
+      required:
+        - status
+        - message
+      properties:
+        status:
+          type: string
+          description: Status of the operation
+          enum: [success, error]
+          example: success
+        message:
+          type: string
+          description: Additional details about the operation result
+          example: "API key created and broadcasted to gateways successfully"
+        keyId:
+          type: string
+          description: The internal ID generated for tracking
+          example: "production-key-01"
+
+    UpdateAPIKeyRequest:
+      type: object
+      required:
+        - apiKey
+      properties:
+        name:
+          type: string
+          description: Unique identifier for this API key within the API (optional; if omitted,
+            generated from displayName)
+          example: "production-key-01"
+        displayName:
+          type: string
+          description: Display name of the API key
+          example: "Production API Key (Updated)"
+        apiKey:
+          type: string
+          description: The new plain text API key value that will be hashed before storage
+          example: "sk_example_new1234567890abcdef"
+        externalRefId:
+          type: string
+          description: Optional reference ID for tracing purposes (from external platforms)
+          nullable: true
+          example: "ext-ref-12345"
+        operations:
+          type: string
+          description: |
+            Specifies which API operations this key can access. Use "*" for all operations.
+          default: "*"
+          example: "*"
+        expiresAt:
+          type: string
+          format: date-time
+          description: Optional expiration time in ISO 8601 format
+          nullable: true
+          example: "2027-12-31T23:59:59Z"
+        expiresIn:
+          $ref: '#/components/schemas/ExpirationDuration'
+          description: Optional expiration duration
+
+    UpdateAPIKeyResponse:
+      type: object
+      required:
+        - status
+        - message
+      properties:
+        status:
+          type: string
+          description: Status of the operation
+          enum: [success, error]
+          example: success
+        message:
+          type: string
+          description: Additional details about the operation result
+          example: "API key updated and broadcasted to gateways successfully"
+        keyId:
+          type: string
+          description: The internal ID of the updated key
+          example: "production-key-01"
 
     Error:
       title: Error object returned
       required:
         - code
-        - message
+        - title
       type: object
       properties:
         code:
           type: integer
           format: int64
-        message:
+        title:
           type: string
           description: Error message
-        description:
+        details:
           type: string
           description: A detailed description about the error message
+        errors:
+          type: array
+          description: List of specific errors (useful for validation errors)
+          items:
+            type: object
 
     GatewayArtifact:
       type: object
@@ -2982,9 +4127,9 @@ components:
           example: "Inventory API"
         type:
           type: string
-          enum: ["API", "MCP", "API_PRODUCT"]
+          enum: ["REST_API", "MCP", "API_PRODUCT"]
           description: Type of artifact deployed to the gateway
-          example: "API"
+          example: "REST_API"
         subType:
           type: string
           enum: ["REST", "ASYNC", "GQL", "WEBSOCKET", "SOAP"]
@@ -3231,7 +4376,7 @@ components:
           description: Timestamp of the response
           example: "2025-10-15T10:30:00Z"
 
-    APIDevPortalResponse:
+    RESTAPIDevPortalResponse:
       type: object
       allOf:
         - $ref: '#/components/schemas/DevPortalResponse'
@@ -3250,10 +4395,10 @@ components:
               description: Whether the API is currently published to this DevPortal
               example: true
             publication:
-              $ref: '#/components/schemas/APIPublicationDetails'
+              $ref: '#/components/schemas/RESTAPIPublicationDetails'
               description: Publication details (only present when isPublished is true)
 
-    APIDevPortalListResponse:
+    RESTAPIDevPortalListResponse:
       type: object
       required:
         - count
@@ -3267,11 +4412,11 @@ components:
         list:
           type: array
           items:
-            $ref: '#/components/schemas/APIDevPortalResponse'
+            $ref: '#/components/schemas/RESTAPIDevPortalResponse'
         pagination:
           $ref: '#/components/schemas/Pagination'
 
-    APIPublicationDetails:
+    RESTAPIPublicationDetails:
       type: object
       description: Details about API publication to a specific DevPortal
       required:
@@ -3323,7 +4468,7 @@ components:
           description: UUID of the DevPortal to publish to
           example: "123e4567-e89b-12d3-a456-426614174000"
         apiInfo:
-          $ref: '#/components/schemas/PublishAPIInfo'
+          $ref: '#/components/schemas/PublishRESTAPIInfo'
         endPoints:
           $ref: '#/components/schemas/EndPoints'
         subscriptionPolicies:
@@ -3344,7 +4489,7 @@ components:
           description: UUID of the DevPortal to unpublish from
           example: "123e4567-e89b-12d3-a456-426614174000"
 
-    PublishAPIInfo:
+    PublishRESTAPIInfo:
       type: object
       description: User-overridable API metadata for publishing
       properties:
@@ -3422,7 +4567,7 @@ components:
           description: Sandbox endpoint URL
           example: "https://sandbox.api.example.com/v1"
 
-    PublishAPIResponse:
+    PublishRESTAPIResponse:
       type: object
       required:
         - message
@@ -3449,7 +4594,7 @@ components:
           description: Timestamp of publication
           example: "2025-10-29T21:25:09.418859918+05:30"
 
-    UnpublishAPIResponse:
+    UnpublishRESTAPIResponse:
       type: object
       required:
         - message
@@ -3560,14 +4705,14 @@ components:
         - required: [ url ]
         - required: [ definition ]
 
-    APIProjectValidationResponse:
+    RESTAPIProjectValidationResponse:
       type: object
       required:
-        - isAPIProjectValid
+        - isRESTAPIProjectValid
         - isAPIConfigValid
-        - isAPIDefinitionValid
+        - isRESTAPIDefinitionValid
       properties:
-        isAPIProjectValid:
+        isRESTAPIProjectValid:
           type: boolean
           description: Indicates if the API project structure is valid
           example: true
@@ -3575,7 +4720,7 @@ components:
           type: boolean
           description: Indicates if the API configuration file is valid
           example: true
-        isAPIDefinitionValid:
+        isRESTAPIDefinitionValid:
           type: boolean
           description: Indicates if the API definition file is valid
           example: true
@@ -3587,7 +4732,7 @@ components:
           example: [ "Missing API definition file", "Invalid API configuration format" ]
         api:
           allOf:
-            - $ref: '#/components/schemas/API'
+            - $ref: '#/components/schemas/RESTAPI'
             - type: object
               description: Details for the validated API project
               required:
@@ -3595,16 +4740,15 @@ components:
                 - description
                 - context
                 - version
-                - backend-services
                 - projectId
                 - operations
 
     OpenAPIValidationResponse:
       type: object
       required:
-        - isAPIDefinitionValid
+        - isRESTAPIDefinitionValid
       properties:
-        isAPIDefinitionValid:
+        isRESTAPIDefinitionValid:
           type: boolean
           description: Indicates if the API definition file is valid
           example: true
@@ -3616,7 +4760,7 @@ components:
           example: [ "Missing OpenAPI definition", "Invalid OpenAPI definition" ]
         api:
           allOf:
-            - $ref: '#/components/schemas/API'
+            - $ref: '#/components/schemas/RESTAPI'
             - type: object
               description: Details for the validated API
               required:
@@ -3652,7 +4796,7 @@ components:
             example: "apis/inventory-api"
           api:
             allOf:
-              - $ref: '#/components/schemas/API'
+              - $ref: '#/components/schemas/RESTAPI'
               - type: object
                 description: API details for the imported project
                 required:
@@ -3661,7 +4805,7 @@ components:
                   - version
                   - projectId
 
-    APIValidationResponse:
+    RESTAPIValidationResponse:
       type: object
       required:
         - valid
@@ -3688,12 +4832,17 @@ components:
             - code
             - message
 
-    DeployAPIRequest:
+    DeployRequest:
       type: object
       required:
+        - name
         - base
         - gatewayId
       properties:
+        name:
+          type: string
+          description: Name/label for this deployment (e.g., "v1.0-prod", "hotfix-2024-01-15")
+          example: "v1.0-production"
         base:
           type: string
           description: The source for the API definition. Can be "current" (latest working copy) or a deploymentId (existing deployment)
@@ -3705,12 +4854,13 @@ components:
         metadata:
           type: object
           additionalProperties: true
-          description: Optional metadata for the deployment
+          description: Optional metadata for the deployment (e.g., endpointUrl overrides)
 
     DeploymentResponse:
       type: object
       required:
         - deploymentId
+        - name
         - gatewayId
         - status
         - createdAt
@@ -3719,6 +4869,10 @@ components:
           type: string
           format: uuid
           description: Unique identifier for the deployment
+        name:
+          type: string
+          description: Name/label for this deployment
+          example: "v1.0-production"
         gatewayId:
           type: string
           format: uuid
@@ -3728,12 +4882,17 @@ components:
           enum:
             - DEPLOYED
             - UNDEPLOYED
-          description: Current deployment status
+            - ARCHIVED
+          description: |
+            Current deployment lifecycle state:
+            - DEPLOYED: Currently active on the gateway
+            - UNDEPLOYED: Suspended but can be rolled back
+            - ARCHIVED: Historical deployment, can be rolled back
         baseDeploymentId:
           type: string
           format: uuid
           nullable: true
-          description: UUID of the previous deployment (if redeployed)
+          description: UUID of the base deployment this was created from
         metadata:
           type: object
           additionalProperties: true
@@ -3741,7 +4900,12 @@ components:
         createdAt:
           type: string
           format: date-time
-          description: Timestamp when the deployment was created
+          description: Timestamp when the deployment artifact was created
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the deployment status last changed (null for ARCHIVED deployments)
 
     DeploymentListResponse:
       type: object
@@ -3758,6 +4922,899 @@ components:
             $ref: '#/components/schemas/DeploymentResponse'
           description: List of deployments
 
+    Upstream:
+      type: object
+      description: Upstream backend configuration with main and sandbox endpoints
+      required:
+        - main
+      properties:
+        main:
+          $ref: '#/components/schemas/UpstreamDefinition'
+        sandbox:
+          $ref: '#/components/schemas/UpstreamDefinition'
+
+    UpstreamDefinition:
+      type: object
+      oneOf:
+        - required: [ "url" ]
+        - required: [ "ref" ]
+      description: Upstream endpoint configuration (single target or reference)
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Direct backend URL to route traffic to
+          example: http://prod-backend:5000/api/v2
+        ref:
+          type: string
+          description: Reference to a predefined upstreamDefinition
+        auth:
+          $ref: '#/components/schemas/UpstreamAuth'
+
+    UpstreamAuth:
+      type: object
+      description: Authentication configuration for upstream endpoints
+      properties:
+        type:
+          type: string
+          description: Authentication type
+          enum: [ basic, bearer, api-key ]
+          example: api-key
+        header:
+          type: string
+          description: Header name for api-key authentication (e.g., 'Authorization' for bearer/basic, custom header for api-key)
+          example: X-API-Key
+        value:
+          type: string
+          writeOnly: true
+          format: password
+          description: Authentication value (API key, Bearer token, or Base64 encoded credentials for basic auth)
+          example: my-api-key-value
+
+    ExtractionIdentifier:
+      type: object
+      required:
+        - location
+        - identifier
+      properties:
+        location:
+          type: string
+          description: Where to find the token information
+          enum:
+            - payload
+            - header
+            - queryParam
+            - pathParam
+          example: payload
+        identifier:
+          type: string
+          description: JSONPath expression or header name to identify the token value
+          example: $.usage.inputTokens
+
+    LLMProviderTemplateAuth:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Authentication type used by the LLM provider template
+          example: bearer
+        header:
+          type: string
+          description: Header name to send the auth value
+          example: Authorization
+        valuePrefix:
+          type: string
+          description: Prefix to attach before the auth value
+          example: "Bearer "
+
+    LLMProviderTemplateMetadata:
+      type: object
+      properties:
+        endpointUrl:
+          type: string
+          format: uri
+          description: Default endpoint URL for the template
+          example: https://api.openai.com
+        auth:
+          $ref: '#/components/schemas/LLMProviderTemplateAuth'
+        logoUrl:
+          type: string
+          format: uri
+          description: URL of the provider logo
+          example: https://cdn.example.com/logos/openai.svg
+        openapiSpecUrl:
+          type: string
+          format: uri
+          description: URL to the OpenAPI specification for the provider
+          example: https://api.openai.com/openapi.json
+
+    LLMProviderTemplate:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          description: Unique handle for the template
+          example: openai
+        name:
+          type: string
+          description: Human-readable LLM Template name
+          minLength: 1
+          maxLength: 253
+          example: OpenAI
+        description:
+          type: string
+          description: Description of the LLM provider template
+          maxLength: 1023
+          example: Default OpenAI template
+        createdBy:
+          type: string
+          description: Username of the creator
+          readOnly: true
+          example: jane.doe
+        metadata:
+          $ref: '#/components/schemas/LLMProviderTemplateMetadata'
+        promptTokens:
+          $ref: '#/components/schemas/ExtractionIdentifier'
+        completionTokens:
+          $ref: '#/components/schemas/ExtractionIdentifier'
+        totalTokens:
+          $ref: '#/components/schemas/ExtractionIdentifier'
+        remainingTokens:
+          $ref: '#/components/schemas/ExtractionIdentifier'
+        requestModel:
+          $ref: '#/components/schemas/ExtractionIdentifier'
+        responseModel:
+          $ref: '#/components/schemas/ExtractionIdentifier'
+        createdAt:
+          type: string
+          format: date-time
+          description: Timestamp when the resource was created
+          readOnly: true
+          example: "2023-10-12T10:30:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: Timestamp when the resource was last updated
+          readOnly: true
+          example: "2023-10-12T10:30:00Z"
+
+    LLMProviderTemplateListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          example: openai
+        name:
+          type: string
+          example: OpenAI
+        description:
+          type: string
+          example: Default OpenAI template
+        createdBy:
+          type: string
+          example: jane.doe
+        createdAt:
+          type: string
+          format: date-time
+          example: 2025-11-25T10:30:00Z
+        updatedAt:
+          type: string
+          format: date-time
+          example: 2025-11-25T10:30:00Z
+
+    LLMProviderTemplateListResponse:
+      type: object
+      required:
+        - count
+        - list
+        - pagination
+      properties:
+        count:
+          type: integer
+          example: 5
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/LLMProviderTemplateListItem'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    LLMAccessControl:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          description: Access control mode
+          example: deny_all
+          enum:
+            - allow_all
+            - deny_all
+        exceptions:
+          type: array
+          description: Path exceptions to the access control mode
+          items:
+            $ref: '#/components/schemas/RouteException'
+
+    RouteException:
+      type: object
+      required:
+        - path
+        - methods
+      properties:
+        path:
+          type: string
+          description: Path pattern
+          example: /chat/completions
+        methods:
+          type: array
+          description: HTTP methods
+          items:
+            type: string
+            enum: [ GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD, "*" ]
+
+    LLMPolicy:
+      type: object
+      required:
+        - name
+        - version
+        - paths
+      properties:
+        name:
+          type: string
+          example: budgetControl
+        version:
+          type: string
+          example: v1.0.0
+        paths:
+          type: array
+          items:
+            $ref: '#/components/schemas/LLMPolicyPath'
+
+    LLMPolicyPath:
+      type: object
+      required:
+        - path
+        - methods
+        - params
+      properties:
+        path:
+          type: string
+          example: /chat/completions
+        methods:
+          type: array
+          items:
+            type: string
+            enum: [ GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD, "*" ]
+        params:
+          type: object
+          description: JSON Schema describing the parameters accepted by this policy. This itself is a JSON Schema document.
+          additionalProperties: true
+
+    LLMRateLimitingConfig:
+      type: object
+      description: Rate limiting configuration for an LLM provider at provider and consumer levels.
+      properties:
+        providerLevel:
+          $ref: '#/components/schemas/RateLimitingScopeConfig'
+        consumerLevel:
+          $ref: '#/components/schemas/RateLimitingScopeConfig'
+      example:
+        providerLevel:
+          global:
+            request:
+              enabled: true
+              count: 1500
+              reset:
+                duration: 2
+                unit: week
+            token:
+              enabled: true
+              count: 1000000
+              reset:
+                duration: 1
+                unit: month
+        consumerLevel:
+          resourceWise:
+            default:
+              request:
+                enabled: true
+                count: 50
+                reset:
+                  duration: 2
+                  unit: week
+              cost:
+                enabled: true
+                amount: 100
+                reset:
+                  duration: 1
+                  unit: month
+            resources:
+              - resource: /models
+                limit:
+                  request:
+                    enabled: true
+                    count: 200
+                    reset:
+                      duration: 1
+                      unit: week
+                  token:
+                    enabled: true
+                    count: 100000
+                    reset:
+                      duration: 1
+                      unit: month
+              - resource: /chat/completions
+                limit:
+                  request:
+                    enabled: true
+                    count: 25
+                    reset:
+                      duration: 1
+                      unit: week
+                  cost:
+                    enabled: true
+                    amount: 10
+                    reset:
+                      duration: 1
+                      unit: month
+
+    RateLimitingScopeConfig:
+      type: object
+      description: Rate limiting configuration for a scope (provider or consumer). Either global or resource-wise limits can be defined.
+      oneOf:
+        - required: [ global ]
+        - required: [ resourceWise ]
+      properties:
+        global:
+          $ref: '#/components/schemas/RateLimitingLimitConfig'
+        resourceWise:
+          $ref: '#/components/schemas/ResourceWiseRateLimitingConfig'
+
+    ResourceWiseRateLimitingConfig:
+      type: object
+      description: Resource-specific limits with a required default limit.
+      required:
+        - default
+        - resources
+      properties:
+        default:
+          $ref: '#/components/schemas/RateLimitingLimitConfig'
+        resources:
+          type: array
+          description: Explicit resource limits that override the default limit.
+          items:
+            $ref: '#/components/schemas/RateLimitingResourceLimit'
+
+    RateLimitingResourceLimit:
+      type: object
+      required:
+        - resource
+        - limit
+      properties:
+        resource:
+          type: string
+          description: Explicit resource path to apply the limit to.
+          example: /chat/completions
+        limit:
+          $ref: '#/components/schemas/RateLimitingLimitConfig'
+
+    RateLimitResetWindow:
+      type: object
+      required: [ duration, unit ]
+      properties:
+        duration:
+          type: integer
+          description: Reset duration for the limit window.
+          example: 2
+          minimum: 1
+        unit:
+          type: string
+          description: Reset time unit for the limit window.
+          enum: [ minute, hour, day, week, month ]
+          example: week
+
+    RequestRateLimitDimension:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Enable request-count based limiting.
+        count:
+          type: integer
+          description: Maximum number of requests in the reset window.
+          example: 1500
+          minimum: 1
+        reset:
+          $ref: '#/components/schemas/RateLimitResetWindow'
+
+    TokenRateLimitDimension:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Enable token-count based limiting.
+        count:
+          type: integer
+          description: Maximum number of tokens in the reset window.
+          example: 1000000
+          minimum: 1
+        reset:
+          $ref: '#/components/schemas/RateLimitResetWindow'
+
+    CostRateLimitDimension:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Enable cost-based limiting.
+        amount:
+          type: number
+          format: float
+          description: Maximum cost in the reset window.
+          example: 1000
+          minimum: 0
+        reset:
+          $ref: '#/components/schemas/RateLimitResetWindow'
+
+    RateLimitingLimitConfig:
+      type: object
+      description: >-
+        Limit definition with independent request/token/cost dimensions.
+        If all dimensions are disabled (or absent), rate limiting is off for that scope.
+      properties:
+        request:
+          $ref: '#/components/schemas/RequestRateLimitDimension'
+        token:
+          $ref: '#/components/schemas/TokenRateLimitDimension'
+        cost:
+          $ref: '#/components/schemas/CostRateLimitDimension'
+
+    LLMProvider:
+      type: object
+      required:
+        - id
+        - name
+        - version
+        - template
+        - upstream
+        - accessControl
+      properties:
+        id:
+          type: string
+          description: Unique handle for the provider
+          example: wso2-openai-provider
+        name:
+          type: string
+          description: Human-readable LLM Provider name
+          minLength: 1
+          maxLength: 100
+          pattern: '^[a-zA-Z0-9\-_\. ]+$'
+          example: WSO2 OpenAI Provider
+        description:
+          type: string
+          description: Description of the LLM provider
+          maxLength: 1023
+          example: Primary OpenAI provider
+        createdBy:
+          type: string
+          description: Username of the creator
+          readOnly: true
+          example: jane.doe
+        version:
+          type: string
+          description: Semantic version of the LLM Provider
+          pattern: '^v\d+\.\d+$'
+          example: v1.0
+        context:
+          type: string
+          description: Base path for all REST API routes (must start with /, no trailing slash)
+          pattern: '^\/([a-zA-Z0-9_\-\/]*[^\/])?$'
+          default: /
+          minLength: 1
+          maxLength: 20
+          example: /openai
+        vhost:
+          type: string
+          description: >
+            Virtual host name used for routing. Supports standard domain names,
+            subdomains, or wildcard domains. Must follow RFC-compliant hostname
+            rules. Wildcards are only allowed in the left-most label (e.g., *.example.com).
+          pattern: '^(\*\.|[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+          minLength: 1
+          maxLength: 253
+          example: "api.openai"
+        template:
+          type: string
+          description: Template name to use for this LLM Provider
+          example: openai
+        openapi:
+          type: string
+          description: OpenAPI specification (JSON or YAML) for the provider endpoint
+          example: |
+            openapi: 3.0.3
+            info:
+              title: Provider API
+              version: v1.0
+            paths: {}
+        modelProviders:
+          type: array
+          description: >
+            List of model providers and their models supported by this provider. For non-aggregator
+            templates, only a single model provider is allowed (aggregator templates: awsbedrock,
+            azureaifoundry).
+          items:
+            $ref: '#/components/schemas/LLMModelProvider'
+        upstream:
+          $ref: "#/components/schemas/Upstream"
+        accessControl:
+          $ref: '#/components/schemas/LLMAccessControl'
+        rateLimiting:
+          $ref: '#/components/schemas/LLMRateLimitingConfig'
+        policies:
+          type: array
+          description: List of policies applied only to this operation (overrides or adds to API-level policies)
+          items:
+            $ref: "#/components/schemas/LLMPolicy"
+        security:
+          $ref: '#/components/schemas/SecurityConfig'
+        createdAt:
+          type: string
+          format: date-time
+          description: Timestamp when the resource was created
+          readOnly: true
+          example: "2023-10-12T10:30:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: Timestamp when the resource was last updated
+          readOnly: true
+          example: "2023-10-12T10:30:00Z"
+
+    LLMProviderListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          example: wso2-openai-provider
+        name:
+          type: string
+          example: WSO2 OpenAI Provider
+        description:
+          type: string
+          example: Primary OpenAI provider
+        createdBy:
+          type: string
+          example: jane.doe
+        version:
+          type: string
+          example: v1.0
+        template:
+          type: string
+          example: openai
+        status:
+          type: string
+          enum:
+            - pending
+            - deployed
+            - failed
+          example: deployed
+        createdAt:
+          type: string
+          format: date-time
+          example: 2025-11-25T10:30:00Z
+        updatedAt:
+          type: string
+          format: date-time
+          example: 2025-11-25T10:30:00Z
+
+    LLMModelProvider:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          description: Unique model provider identifier
+          example: claude
+        name:
+          type: string
+          description: Human-readable model provider name
+          example: Claude
+        models:
+          type: array
+          description: Models under this model provider
+          items:
+            $ref: '#/components/schemas/LLMModel'
+
+    LLMModel:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          description: Unique model identifier
+          example: claude-3-5-sonnet
+        name:
+          type: string
+          description: Human-readable model name
+          example: Claude 3.5 Sonnet
+        description:
+          type: string
+          description: Model description
+          example: High-quality reasoning model
+
+    LLMProviderListResponse:
+      type: object
+      required:
+        - count
+        - list
+        - pagination
+      properties:
+        count:
+          type: integer
+          example: 2
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/LLMProviderListItem'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    LLMProxy:
+      type: object
+      required:
+        - id
+        - name
+        - version
+        - projectId
+        - provider
+      properties:
+        id:
+          type: string
+          description: Unique handle for the proxy
+          example: wso2-con-assistant
+        name:
+          type: string
+          description: Human-readable LLM proxy name (must be URL-friendly - only letters, numbers, spaces, hyphens, underscores, and dots allowed)
+          minLength: 1
+          maxLength: 253
+          pattern: '^[a-zA-Z0-9\-_\. ]+$'
+          example: wso2-con-assistant
+        description:
+          type: string
+          description: Description of the LLM proxy
+          maxLength: 1023
+          example: Customer support assistant
+        createdBy:
+          type: string
+          description: Username of the creator
+          readOnly: true
+          example: jane.doe
+        version:
+          type: string
+          description: Semantic version of the LLM proxy
+          pattern: '^v\d+\.\d+$'
+          example: v1.0
+        projectId:
+          type: string
+          description: UUID of the project this proxy belongs to
+          example: 550e8400-e29b-41d4-a716-446655440000
+        context:
+          type: string
+          description: Base path for all REST API routes (must start with /, no trailing slash)
+          pattern: '^\/([a-zA-Z0-9_\-\/]*[^\/])?$'
+          default: /
+          minLength: 1
+          maxLength: 200
+          example: /openai
+        vhost:
+          type: string
+          description: >
+            Virtual host name used for routing. Supports standard domain names,
+            subdomains, or wildcard domains. Must follow RFC-compliant hostname
+            rules. Wildcards are only allowed in the left-most label (e.g., *.example.com).
+          pattern: '^(\*\.|[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+          minLength: 1
+          maxLength: 253
+          example: "api.openai"
+        provider:
+          $ref: '#/components/schemas/LLMProxyProvider'
+        openapi:
+          type: string
+          description: OpenAPI specification (JSON or YAML) for the proxy endpoint
+          example: |
+            openapi: 3.0.3
+            info:
+              title: Proxy API
+              version: v1.0
+            paths: {}
+        policies:
+          type: array
+          description: List of policies applied only to this operation (overrides or adds to API-level policies)
+          items:
+            $ref: "#/components/schemas/LLMPolicy"
+        security:
+          $ref: '#/components/schemas/SecurityConfig'
+        createdAt:
+          type: string
+          format: date-time
+          description: Timestamp when the resource was created
+          readOnly: true
+          example: "2023-10-12T10:30:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: Timestamp when the resource was last updated
+          readOnly: true
+          example: "2023-10-12T10:30:00Z"
+
+    LLMProxyListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          example: wso2-con-assistant
+        name:
+          type: string
+          example: WSO2 Con Assistant
+        description:
+          type: string
+          example: Customer support assistant
+        createdBy:
+          type: string
+          example: jane.doe
+        context:
+          type: string
+          description: Context path where the proxy is exposed
+          example: /wso2-con-assistant
+        version:
+          type: string
+          example: v1.0
+        projectId:
+          type: string
+          description: UUID of the project this proxy belongs to
+          example: 550e8400-e29b-41d4-a716-446655440000
+        provider:
+          type: string
+          description: Unique id of a deployed llm provider
+          example: wso2-openai-provider
+        status:
+          type: string
+          enum:
+            - pending
+            - deployed
+            - failed
+          example: deployed
+        createdAt:
+          type: string
+          format: date-time
+          example: 2025-11-25T10:30:00Z
+        updatedAt:
+          type: string
+          format: date-time
+          example: 2025-11-25T10:30:00Z
+
+    LLMProxyListResponse:
+      type: object
+      required:
+        - count
+        - list
+        - pagination
+      properties:
+        count:
+          type: integer
+          example: 2
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/LLMProxyListItem'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    LLMProxyProvider:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          description: Unique id of a deployed llm provider
+          example: wso2-openai-provider
+        auth:
+          $ref: '#/components/schemas/UpstreamAuth'
+
+    CreateLLMProviderAPIKeyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Unique identifier for the API key within the LLM provider. If not provided, generated from displayName.
+          minLength: 3
+          maxLength: 63
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          example: "production-key"
+        displayName:
+          type: string
+          description: User-friendly name for the API key
+          example: "Production Key"
+        expiresAt:
+          type: string
+          format: date-time
+          description: Optional expiration time in ISO 8601 format
+          example: "2026-12-31T23:59:59Z"
+    CreateLLMProviderAPIKeyResponse:
+      type: object
+      required:
+        - status
+        - message
+        - keyId
+        - apiKey
+      properties:
+        status:
+          type: string
+          description: Status of the operation
+          example: "success"
+        message:
+          type: string
+          description: Detailed message about the operation result
+          example: "API key created and broadcasted to gateways successfully"
+        keyId:
+          type: string
+          description: Unique identifier of the generated key
+          example: "production-key"
+        apiKey:
+          type: string
+          description: The generated API key value (shown only once, 64 hexadecimal characters)
+          example: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456"
+    CreateLLMProxyAPIKeyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Unique identifier for the API key within the LLM proxy. If not provided, generated from displayName.
+          minLength: 3
+          maxLength: 63
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          example: "production-key"
+        displayName:
+          type: string
+          description: User-friendly name for the API key
+          example: "Production Key"
+        expiresAt:
+          type: string
+          format: date-time
+          description: Optional expiration time in ISO 8601 format
+          example: "2026-12-31T23:59:59Z"
+    CreateLLMProxyAPIKeyResponse:
+      type: object
+      required:
+        - status
+        - message
+        - keyId
+        - apiKey
+      properties:
+        status:
+          type: string
+          description: Status of the operation
+          example: "success"
+        message:
+          type: string
+          description: Detailed message about the operation result
+          example: "API key created and broadcasted to gateways successfully"
+        keyId:
+          type: string
+          description: Unique identifier of the generated key
+          example: "production-key"
+        apiKey:
+          type: string
+          description: The generated API key value (shown only once, 64 hexadecimal characters)
+          example: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456"
   responses:
     Unauthorized:
       description: Unauthorized. Authentication credentials are missing or invalid.
@@ -3834,7 +5891,7 @@ components:
         format: uuid
         example: "yr434567-de34-76uj6-w376-234324532"
 
-    apiID:
+    apiId:
       name: apiId
       in: path
       description: |
@@ -3842,7 +5899,7 @@ components:
       required: true
       schema:
         type: string
-        example: my-api-handle
+        example: my-rest-api-handle
 
 
     projectId-Q:
@@ -3850,10 +5907,9 @@ components:
       in: query
       required: false
       description: |
-        **Project ID** consisting of the **UUID** of the Project to filter APIs by.
+        **Project ID** consisting of the **UUID** of the Project to filter REST APIs by.
       schema:
         type: string
-        format: uuid
         example: "yr434567-de34-76uj6-w376-234324532"
 
     gatewayId-Q:
@@ -3864,7 +5920,6 @@ components:
         **Gateway ID** consisting of the **UUID** of the Gateway to filter status by.
       schema:
         type: string
-        format: uuid
         example: "987e6543-e21b-45d3-a789-426614174999"
 
     api-identifier-Q:
@@ -3876,7 +5931,7 @@ components:
         Either this parameter or both 'name' and 'version' parameters are required.
       schema:
         type: string
-        example: "weather-v1"
+        example: "weather-rest-v1"
 
     api-name-Q:
       name: name
@@ -3887,7 +5942,7 @@ components:
         Must be used together with 'version' parameter if 'identifier' is not provided.
       schema:
         type: string
-        example: "Weather API"
+        example: "Weather REST API"
 
     api-version-Q:
       name: version
@@ -3929,8 +5984,8 @@ components:
       description: Filter artifacts by type
       schema:
         type: string
-        enum: ["API", "MCP", "API_PRODUCT"]
-      example: "API"
+        enum: ["REST_API", "MCP", "API_PRODUCT"]
+      example: "REST_API"
 
     depth-Q:
       name: depth
@@ -3978,7 +6033,8 @@ components:
         enum:
           - DEPLOYED
           - UNDEPLOYED
-      description: Filter deployments by status (DEPLOYED or UNDEPLOYED)
+          - ARCHIVED
+      description: Filter deployments by status (DEPLOYED, UNDEPLOYED, or ARCHIVED)
 
 tags:
   - name: Health
@@ -3987,9 +6043,9 @@ tags:
     description: Organization management operations
   - name: Projects
     description: Project management operations
-  - name: APIs
+  - name: REST APIs
     description: API management operations
-  - name: API Deployments
+  - name: REST API Deployments
     description: API deployment artifact management and lifecycle operations
   - name: API Portal
     description: API portal publishing and unpublishing operations
@@ -3999,3 +6055,15 @@ tags:
     description: Gateway registration and management operations
   - name: Gateway Tokens
     description: Gateway token rotation and revocation operations
+  - name: Imports
+    description: Operations related to importing
+  - name: LLM Providers
+    description: LLM provider management operations
+  - name: LLM Proxies
+    description: LLM proxy management operations
+  - name: LLM Provider Templates
+    description: LLM provider template management operations
+  - name: LLM Provider Deployments
+    description: LLM provider deployment operations
+  - name: API Keys
+    description: API key management operations for REST APIs and LLM Providers

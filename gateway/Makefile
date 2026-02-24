@@ -28,9 +28,8 @@ DOCKER_REGISTRY ?= ghcr.io/wso2/api-platform
 
 # Image names
 CONTROLLER_IMAGE := $(DOCKER_REGISTRY)/gateway-controller
-POLICY_ENGINE_IMAGE := $(DOCKER_REGISTRY)/policy-engine
 GATEWAY_BUILDER_IMAGE := $(DOCKER_REGISTRY)/gateway-builder
-ROUTER_IMAGE := $(DOCKER_REGISTRY)/gateway-router
+GATEWAY_RUNTIME_IMAGE := $(DOCKER_REGISTRY)/gateway-runtime
 
 .DEFAULT_GOAL := help
 
@@ -40,18 +39,18 @@ help: ## Show this help message
 	@echo ''
 	@echo 'Build Targets:'
 	@echo '  make build                                      - Build all gateway component Docker images (buildx)'
-	@echo '  make build-local                                - Build all gateway component Docker images locally (faster)'
 	@echo '  make build-controller                           - Build gateway-controller Docker image'
+	@echo '  make build-controller-debug                     - Build debug gateway-controller image for remote debugging (dlv on port 2345)'
 	@echo '  make build-gateway-builder                      - Build gateway-builder Docker image'
-	@echo '  make build-policy-engine                        - Build policy-engine Docker images'
-	@echo '  make build-router                               - Build router Docker image'
+	@echo '  make build-gateway-runtime                      - Build gateway-runtime Docker image (Router + Policy Engine)'
+	@echo '  make build-debug                                - Build all debug images (controller + runtime) for remote debugging'
+	@echo '  make build-gateway-runtime-debug                - Build debug gateway-runtime image for remote debugging (dlv on port 2346)'
 	@echo ''
 	@echo 'Multi-arch Build and Push Targets:'
 	@echo '  make build-and-push-multiarch                   - Build and push all gateway components for multiple architectures'
 	@echo '  make build-and-push-multiarch-controller        - Build and push controller for multiple architectures'
 	@echo '  make build-and-push-multiarch-gateway-builder   - Build and push gateway-builder for multiple architectures'
-	@echo '  make build-and-push-multiarch-policy-engine     - Build and push policy-engine for multiple architectures'
-	@echo '  make build-and-push-multiarch-router            - Build and push router for multiple architectures'
+	@echo '  make build-and-push-multiarch-gateway-runtime   - Build and push gateway-runtime for multiple architectures'
 	@echo ''
 	@echo 'Test Targets:'
 	@echo '  make test                      - Run all tests'
@@ -63,69 +62,72 @@ help: ## Show this help message
 	@echo '  make test-integration-all      - Build coverage images and run integration tests'
 	@echo '  make build-coverage            - Build all coverage-instrumented gateway components'
 	@echo '  make build-controller-coverage - Build coverage-instrumented gateway-controller Docker image'
+	@echo '  make build-gateway-runtime-coverage - Build coverage-instrumented gateway-runtime Docker image'
 	@echo '  make test-integration          - Run integration tests'
+	@echo ''
+	@echo 'Version Management:'
+	@echo '  make version-set VERSION=X              - Set gateway version and update artifacts'
+	@echo '  make version-bump-patch                 - Bump patch version'
+	@echo '  make version-bump-minor                 - Bump minor version'
+	@echo '  make version-bump-major                 - Bump major version'
+	@echo '  make version-bump-next-dev              - Bump to next minor dev version with SNAPSHOT'
+	@echo '  make version-get-release                - Get release version (strips SNAPSHOT suffix)'
 	@echo ''
 	@echo 'Clean Targets:'
 	@echo '  make clean                     - Clean all build artifacts'
 
 # Build Targets
 .PHONY: build
-build: build-controller build-gateway-builder build-policy-engine build-router ## Build all gateway components
+build: build-controller build-gateway-builder build-gateway-runtime ## Build all gateway components
 
-.PHONY: build-local
-build-local: build-local-controller build-local-gateway-builder build-local-policy-engine build-local-router ## Build all gateway components locally (faster)
+
+.PHONY: build-debug
+build-debug: build-controller-debug build-gateway-runtime-debug ## Build all debug images (controller + runtime) for remote debugging
 
 .PHONY: build-coverage
-build-coverage: build-controller-coverage build-gateway-builder build-policy-engine build-router ## Build all coverage-instrumented gateway components
+build-coverage: build-gateway-builder build-controller-coverage build-gateway-runtime-coverage ## Build all coverage-instrumented gateway components
 
 .PHONY: build-controller
 build-controller: ## Build gateway-controller Docker image
 	@echo "Building controller Docker image ($(VERSION))..."
 	$(MAKE) -C gateway-controller build VERSION=$(VERSION)
 
-.PHONY: build-local-controller
-build-local-controller: ## Build gateway-controller Docker image locally (faster)
-	@echo "Building controller Docker image locally ($(VERSION))..."
-	$(MAKE) -C gateway-controller build-local VERSION=$(VERSION)
 
 .PHONY: build-controller-coverage
 build-controller-coverage: ## Build coverage-instrumented gateway-controller Docker image
 	@echo "Building coverage-instrumented controller Docker image ($(VERSION))..."
 	$(MAKE) -C gateway-controller build-coverage-image VERSION=$(VERSION)
 
+.PHONY: build-controller-debug
+build-controller-debug: ## Build debug gateway-controller image for remote debugging
+	@echo "Building debug controller Docker image ($(VERSION))..."
+	$(MAKE) -C gateway-controller build-debug VERSION=$(VERSION)
+
 .PHONY: build-gateway-builder
 build-gateway-builder: ## Build gateway-builder Docker image
 	@echo "Building gateway-builder Docker image ($(VERSION))..."
 	$(MAKE) -C gateway-builder build VERSION=$(VERSION)
 
-.PHONY: build-local-gateway-builder
-build-local-gateway-builder: ## Build gateway-builder Docker image locally (faster)
-	@echo "Building gateway-builder Docker image locally ($(VERSION))..."
-	$(MAKE) -C gateway-builder build-local VERSION=$(VERSION)
 
-.PHONY: build-policy-engine
-build-policy-engine: ## Build policy-engine Docker images
-	@echo "Building policy-engine images ($(VERSION))..."
-	$(MAKE) -C policy-engine build VERSION=$(VERSION)
+.PHONY: build-gateway-runtime
+build-gateway-runtime: ## Build gateway-runtime Docker image (Router + Policy Engine)
+	@echo "Building gateway-runtime Docker image ($(VERSION))..."
+	$(MAKE) -C gateway-runtime build VERSION=$(VERSION)
 
-.PHONY: build-local-policy-engine
-build-local-policy-engine: ## Build policy-engine Docker images locally (faster)
-	@echo "Building policy-engine images locally ($(VERSION))..."
-	$(MAKE) -C policy-engine build-local VERSION=$(VERSION)
 
-.PHONY: build-router
-build-router: ## Build router Docker image
-	@echo "Building router Docker image ($(VERSION))..."
-	$(MAKE) -C router build VERSION=$(VERSION)
+.PHONY: build-gateway-runtime-coverage
+build-gateway-runtime-coverage: ## Build coverage-instrumented gateway-runtime Docker image
+	@echo "Building coverage-instrumented gateway-runtime Docker image ($(VERSION))..."
+	$(MAKE) -C gateway-runtime build-coverage-image VERSION=$(VERSION)
 
-.PHONY: build-local-router
-build-local-router: ## Build router Docker image locally (faster)
-	@echo "Building router Docker image locally ($(VERSION))..."
-	$(MAKE) -C router build-local VERSION=$(VERSION)
+.PHONY: build-gateway-runtime-debug
+build-gateway-runtime-debug: ## Build debug gateway-runtime image for remote debugging
+	@echo "Building debug gateway-runtime Docker image ($(VERSION))..."
+	$(MAKE) -C gateway-runtime build-debug VERSION=$(VERSION)
 
 # Multi-arch Build and Push Targets
 .PHONY: build-and-push-multiarch
-build-and-push-multiarch: build-and-push-multiarch-controller build-and-push-multiarch-gateway-builder build-and-push-multiarch-policy-engine build-and-push-multiarch-router ## Build and push all gateway components for multiple architectures
+build-and-push-multiarch: build-and-push-multiarch-controller build-and-push-multiarch-gateway-builder build-and-push-multiarch-gateway-runtime ## Build and push all gateway components for multiple architectures
 
 .PHONY: build-and-push-multiarch-controller
 build-and-push-multiarch-controller: ## Build and push gateway-controller Docker image for multiple architectures
@@ -137,15 +139,10 @@ build-and-push-multiarch-gateway-builder: ## Build and push gateway-builder Dock
 	@echo "Building and pushing multi-arch gateway-builder Docker image ($(VERSION))..."
 	$(MAKE) -C gateway-builder build-and-push-multiarch VERSION=$(VERSION)
 
-.PHONY: build-and-push-multiarch-policy-engine
-build-and-push-multiarch-policy-engine: ## Build and push policy-engine Docker images for multiple architectures
-	@echo "Building and pushing multi-arch policy-engine images ($(VERSION))..."
-	$(MAKE) -C policy-engine build-and-push-multiarch VERSION=$(VERSION)
-
-.PHONY: build-and-push-multiarch-router
-build-and-push-multiarch-router: ## Build and push router Docker image for multiple architectures
-	@echo "Building and pushing multi-arch router Docker image ($(VERSION))..."
-	$(MAKE) -C router build-and-push-multiarch VERSION=$(VERSION)
+.PHONY: build-and-push-multiarch-gateway-runtime
+build-and-push-multiarch-gateway-runtime: ## Build and push gateway-runtime Docker image for multiple architectures
+	@echo "Building and pushing multi-arch gateway-runtime Docker image ($(VERSION))..."
+	$(MAKE) -C gateway-runtime build-and-push-multiarch VERSION=$(VERSION)
 
 # Test Targets
 .PHONY: test
@@ -161,7 +158,7 @@ test-gateway-builder: ## Test gateway-builder
 
 .PHONY: test-policy-engine
 test-policy-engine: ## Test policy-engine
-	$(MAKE) -C policy-engine test
+	$(MAKE) -C gateway-runtime test
 
 .PHONY: test-integration
 test-integration: ## Run integration tests
@@ -170,10 +167,49 @@ test-integration: ## Run integration tests
 .PHONY: test-integration-all
 test-integration-all: build-coverage test-integration ## Build coverage images and run integration tests
 
+# Version Management Targets
+.PHONY: version-set
+version-set: ## Set gateway version and update artifacts
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Error: VERSION required"; \
+		echo "Usage: make version-set VERSION=1.0.0"; \
+		exit 1; \
+	fi
+	@echo "$(VERSION)" > VERSION
+	@sed -i.bak 's/^  version: .*/  version: $(VERSION)/' build.yaml && rm -f build.yaml.bak
+	@sed -i.bak 's/^  version: .*/  version: $(VERSION)/' sample-policies/build.yaml && rm -f sample-policies/build.yaml.bak
+	@(cd .. && bash scripts/update-docker-compose.sh gateway $(VERSION))
+	@(cd .. && bash scripts/update-helm.sh gateway $(VERSION))
+	@echo "✓ Set gateway version to $(VERSION)"
+
+.PHONY: version-bump-patch
+version-bump-patch: ## Bump patch version
+	@$(MAKE) version-set VERSION=$$(cd .. && bash scripts/next-version.sh patch gateway)
+
+.PHONY: version-bump-minor
+version-bump-minor: ## Bump minor version
+	@$(MAKE) version-set VERSION=$$(cd .. && bash scripts/next-version.sh minor gateway)
+
+.PHONY: version-bump-major
+version-bump-major: ## Bump major version
+	@$(MAKE) version-set VERSION=$$(cd .. && bash scripts/next-version.sh major gateway)
+
+.PHONY: version-bump-next-dev
+version-bump-next-dev: ## Bump to next minor dev version with SNAPSHOT suffix
+	@$(MAKE) version-set VERSION=$$(cd .. && bash scripts/next-version.sh next-dev gateway)
+
+.PHONY: version-get-release
+version-get-release: ## Get release version (strips SNAPSHOT suffix)
+	@VERSION=$$(cat VERSION 2>/dev/null | tr -d '[:space:]' | sed 's/-SNAPSHOT//'); \
+	if [ -z "$$VERSION" ]; then \
+		echo "Error: VERSION is empty or contains only whitespace. Check gateway/VERSION file." >&2; \
+		exit 1; \
+	fi; \
+	echo "$$VERSION"
+
 # Clean Targets
 .PHONY: clean
 clean: ## Clean all build artifacts
 	$(MAKE) -C gateway-controller clean
 	$(MAKE) -C gateway-builder clean
-	$(MAKE) -C policy-engine clean
-	$(MAKE) -C router clean
+	$(MAKE) -C gateway-runtime clean

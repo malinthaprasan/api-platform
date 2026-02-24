@@ -20,10 +20,11 @@ package handler
 import (
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"platform-api/src/api"
 	"platform-api/src/internal/constants"
-	"platform-api/src/internal/dto"
 	"platform-api/src/internal/middleware"
 	"platform-api/src/internal/service"
 	"platform-api/src/internal/utils"
@@ -31,19 +32,22 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 type APIHandler struct {
 	apiService *service.APIService
+	slogger    *slog.Logger
 }
 
-func NewAPIHandler(apiService *service.APIService) *APIHandler {
+func NewAPIHandler(apiService *service.APIService, slogger *slog.Logger) *APIHandler {
 	return &APIHandler{
 		apiService: apiService,
+		slogger:    slogger,
 	}
 }
 
-// CreateAPI handles POST /api/v1/apis and creates a new API
+// CreateAPI handles POST /api/v1/rest-apis and creates a new API
 func (h *APIHandler) CreateAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -52,9 +56,9 @@ func (h *APIHandler) CreateAPI(c *gin.Context) {
 		return
 	}
 
-	var req service.CreateAPIRequest
+	var req api.CreateRESTAPIRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
+		utils.NewValidationErrorResponse(c, err)
 		return
 	}
 
@@ -74,73 +78,90 @@ func (h *APIHandler) CreateAPI(c *gin.Context) {
 			"API version is required"))
 		return
 	}
-	if req.ProjectID == "" {
+	if req.ProjectId == (openapi_types.UUID{}) {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"Project ID is required"))
 		return
 	}
+	if isEmptyUpstreamDefinition(req.Upstream.Main) && (req.Upstream.Sandbox == nil || isEmptyUpstreamDefinition(*req.Upstream.Sandbox)) {
+		h.slogger.Error("Validation failed: No upstream endpoints provided", "organizationId", orgId)
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+			"At least one upstream endpoint (main or sandbox) is required"))
+		return
+	}
 
-	api, err := h.apiService.CreateAPI(&req, orgId)
+	apiResponse, err := h.apiService.CreateAPI(&req, orgId)
 	if err != nil {
 		if errors.Is(err, constants.ErrHandleExists) {
+			h.slogger.Error("API handle already exists", "organizationId", orgId)
 			c.JSON(http.StatusConflict, utils.NewErrorResponse(409, "Conflict",
 				"API handle already exists"))
 			return
 		}
 		if errors.Is(err, constants.ErrAPINameVersionAlreadyExists) {
+			h.slogger.Error("API with same name and version already exists", "organizationId", orgId)
 			c.JSON(http.StatusConflict, utils.NewErrorResponse(409, "Conflict",
 				"API with same name and version already exists in the organization"))
 			return
 		}
 		if errors.Is(err, constants.ErrAPIAlreadyExists) {
+			h.slogger.Error("API already exists in the project", "organizationId", orgId)
 			c.JSON(http.StatusConflict, utils.NewErrorResponse(409, "Conflict",
 				"API already exists in the project"))
 			return
 		}
 		if errors.Is(err, constants.ErrProjectNotFound) {
+			h.slogger.Error("Project not found", "organizationId", orgId)
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
 				"Project not found"))
 			return
 		}
 		if errors.Is(err, constants.ErrInvalidAPIName) {
+			h.slogger.Error("Invalid API name format", "organizationId", orgId)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				"Invalid API name format"))
 			return
 		}
 		if errors.Is(err, constants.ErrInvalidAPIContext) {
+			h.slogger.Error("Invalid API context format", "organizationId", orgId)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				"Invalid API context format"))
 			return
 		}
 		if errors.Is(err, constants.ErrInvalidAPIVersion) {
+			h.slogger.Error("Invalid API version format", "organizationId", orgId)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				"Invalid API version format"))
 			return
 		}
 		if errors.Is(err, constants.ErrInvalidLifecycleState) {
+			h.slogger.Error("Invalid lifecycle status", "organizationId", orgId)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				"Invalid lifecycle status"))
 			return
 		}
 		if errors.Is(err, constants.ErrInvalidAPIType) {
+			h.slogger.Error("Invalid API type", "organizationId", orgId)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				"Invalid API type"))
 			return
 		}
 		if errors.Is(err, constants.ErrInvalidTransport) {
+			h.slogger.Error("Invalid transport protocol", "organizationId", orgId)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				"Invalid transport protocol"))
 			return
 		}
+		h.slogger.Error("Failed to create API", "organizationId", orgId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to create API"))
 		return
 	}
 
-	c.JSON(http.StatusCreated, api)
+	c.JSON(http.StatusCreated, apiResponse)
 }
 
-// GetAPI handles GET /api/v1/apis/:apiId and retrieves an API by its handle
+// GetAPI handles GET /api/v1/rest-apis/:apiId and retrieves an API by its handle
 func (h *APIHandler) GetAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -156,22 +177,24 @@ func (h *APIHandler) GetAPI(c *gin.Context) {
 		return
 	}
 
-	api, err := h.apiService.GetAPIByHandle(apiId, orgId)
+	apiResponse, err := h.apiService.GetAPIByHandle(apiId, orgId)
 	if err != nil {
 		if errors.Is(err, constants.ErrAPINotFound) {
+			h.slogger.Error("API not found", "apiId", apiId, "organizationId", orgId)
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
 				"API not found"))
 			return
 		}
+		h.slogger.Error("Failed to get API", "apiId", apiId, "organizationId", orgId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to get API"))
 		return
 	}
 
-	c.JSON(http.StatusOK, api)
+	c.JSON(http.StatusOK, apiResponse)
 }
 
-// ListAPIs handles GET /api/v1/apis and lists APIs for an organization with optional project filter
+// ListAPIs handles GET /api/v1/rest-apis and lists APIs for an organization with optional project filter
 func (h *APIHandler) ListAPIs(c *gin.Context) {
 	// Get organization from JWT token
 	orgId, exists := middleware.GetOrganizationFromContext(c)
@@ -181,35 +204,42 @@ func (h *APIHandler) ListAPIs(c *gin.Context) {
 		return
 	}
 
-	// Get optional project filter from query parameter
-	projectId := c.Query("projectId")
-	var projectIdPtr *string
-	if projectId != "" {
-		projectIdPtr = &projectId
+	var params api.ListRESTAPIsParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
+		return
 	}
 
-	apis, err := h.apiService.GetAPIsByOrganization(orgId, projectIdPtr)
+	var projectId string
+	if params.ProjectId != nil {
+		projectId = string(*params.ProjectId)
+	}
+
+	apis, err := h.apiService.GetAPIsByOrganization(orgId, projectId)
 	if err != nil {
 		if errors.Is(err, constants.ErrProjectNotFound) {
+			h.slogger.Error("Project not found", "organizationId", orgId, "projectId", projectId)
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
 				"Project not found"))
 			return
 		}
+		h.slogger.Error("Failed to get APIs", "organizationId", orgId, "projectId", projectId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to get APIs"))
 		return
 	}
 
-	// Return constitution-compliant list response
-	c.JSON(http.StatusOK, dto.APIListResponse{
+	response := api.RESTAPIListResponse{
 		Count: len(apis),
 		List:  apis,
-		Pagination: dto.Pagination{
+		Pagination: api.Pagination{
 			Total:  len(apis),
 			Offset: 0,
 			Limit:  len(apis),
 		},
-	})
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // UpdateAPI updates an existing API identified by handle
@@ -228,44 +258,56 @@ func (h *APIHandler) UpdateAPI(c *gin.Context) {
 		return
 	}
 
-	var req service.UpdateAPIRequest
+	var req api.UpdateRESTAPIRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			err.Error()))
 		return
 	}
 
-	api, err := h.apiService.UpdateAPIByHandle(apiId, &req, orgId)
+	// Validate upstream configuration if provided
+	if isEmptyUpstreamDefinition(req.Upstream.Main) && (req.Upstream.Sandbox == nil || isEmptyUpstreamDefinition(*req.Upstream.Sandbox)) {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+			"At least one upstream endpoint (main or sandbox) is required"))
+		return
+	}
+
+	apiResponse, err := h.apiService.UpdateAPIByHandle(apiId, &req, orgId)
 	if err != nil {
 		if errors.Is(err, constants.ErrAPINotFound) {
+			h.slogger.Error("API not found", "apiId", apiId, "organizationId", orgId)
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
 				"API not found"))
 			return
 		}
 		if errors.Is(err, constants.ErrInvalidLifecycleState) {
+			h.slogger.Error("Invalid lifecycle status", "apiId", apiId, "organizationId", orgId)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				"Invalid lifecycle status"))
 			return
 		}
 		if errors.Is(err, constants.ErrInvalidAPIType) {
+			h.slogger.Error("Invalid API type", "apiId", apiId, "organizationId", orgId)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				"Invalid API type"))
 			return
 		}
 		if errors.Is(err, constants.ErrInvalidTransport) {
+			h.slogger.Error("Invalid transport protocol", "apiId", apiId, "organizationId", orgId)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				"Invalid transport protocol"))
 			return
 		}
+		h.slogger.Error("Failed to update API", "apiId", apiId, "organizationId", orgId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to update API"))
 		return
 	}
 
-	c.JSON(http.StatusOK, api)
+	c.JSON(http.StatusOK, apiResponse)
 }
 
-// DeleteAPI handles DELETE /api/v1/apis/:apiId and deletes an API by its handle
+// DeleteAPI handles DELETE /api/v1/rest-apis/:apiId and deletes an API by its handle
 func (h *APIHandler) DeleteAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -284,10 +326,12 @@ func (h *APIHandler) DeleteAPI(c *gin.Context) {
 	err := h.apiService.DeleteAPIByHandle(apiId, orgId)
 	if err != nil {
 		if errors.Is(err, constants.ErrAPINotFound) {
+			h.slogger.Error("API not found", "apiId", apiId, "organizationId", orgId)
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
 				"API not found"))
 			return
 		}
+		h.slogger.Error("Failed to delete API", "apiId", apiId, "organizationId", orgId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to delete API"))
 		return
@@ -296,7 +340,7 @@ func (h *APIHandler) DeleteAPI(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
-// AddGatewaysToAPI handles POST /api/v1/apis/:apiId/gateways to associate gateways with an API
+// AddGatewaysToAPI handles POST /api/v1/rest-apis/:apiId/gateways to associate gateways with an API
 func (h *APIHandler) AddGatewaysToAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -312,7 +356,7 @@ func (h *APIHandler) AddGatewaysToAPI(c *gin.Context) {
 		return
 	}
 
-	var req []dto.AddGatewayToAPIRequest
+	var req []api.AddGatewayToRESTAPIRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
 		return
@@ -327,30 +371,33 @@ func (h *APIHandler) AddGatewaysToAPI(c *gin.Context) {
 	// Extract gateway IDs from request
 	gatewayIds := make([]string, len(req))
 	for i, gw := range req {
-		gatewayIds[i] = gw.GatewayID
+		gatewayIds[i] = utils.OpenAPIUUIDToString(gw.GatewayId)
 	}
 
-	gateways, err := h.apiService.AddGatewaysToAPIByHandle(apiId, gatewayIds, orgId)
+	gatewaysResponse, err := h.apiService.AddGatewaysToAPIByHandle(apiId, gatewayIds, orgId)
 	if err != nil {
 		if errors.Is(err, constants.ErrAPINotFound) {
+			h.slogger.Error("API not found", "apiId", apiId, "organizationId", orgId)
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
 				"API not found"))
 			return
 		}
 		if errors.Is(err, constants.ErrGatewayNotFound) {
+			h.slogger.Error("One or more gateways not found", "apiId", apiId, "organizationId", orgId)
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
 				"One or more gateways not found"))
 			return
 		}
+		h.slogger.Error("Failed to associate gateways with API", "apiId", apiId, "organizationId", orgId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to associate gateways with API"))
 		return
 	}
 
-	c.JSON(http.StatusOK, gateways)
+	c.JSON(http.StatusOK, gatewaysResponse)
 }
 
-// GetAPIGateways handles GET /api/v1/apis/:apiId/gateways to get gateways associated with an API including deployment details
+// GetAPIGateways handles GET /api/v1/rest-apis/:apiId/gateways to get gateways associated with an API including deployment details
 func (h *APIHandler) GetAPIGateways(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -366,22 +413,24 @@ func (h *APIHandler) GetAPIGateways(c *gin.Context) {
 		return
 	}
 
-	gateways, err := h.apiService.GetAPIGatewaysByHandle(apiId, orgId)
+	gatewaysResponse, err := h.apiService.GetAPIGatewaysByHandle(apiId, orgId)
 	if err != nil {
 		if errors.Is(err, constants.ErrAPINotFound) {
+			h.slogger.Error("API not found", "apiId", apiId, "organizationId", orgId)
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
 				"API not found"))
 			return
 		}
+		h.slogger.Error("Failed to get API gateways", "apiId", apiId, "organizationId", orgId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to get API gateways"))
 		return
 	}
 
-	c.JSON(http.StatusOK, gateways)
+	c.JSON(http.StatusOK, gatewaysResponse)
 }
 
-// PublishToDevPortal handles POST /api/v1/apis/:apiId/devportals/publish
+// PublishToDevPortal handles POST /api/v1/rest-apis/:apiId/devportals/publish
 //
 // This endpoint publishes an API to a specific DevPortal with its metadata and OpenAPI definition.
 // The API must exist in platform-api and the specified DevPortal must be active.
@@ -403,7 +452,7 @@ func (h *APIHandler) PublishToDevPortal(c *gin.Context) {
 	}
 
 	// Parse request body
-	var req dto.PublishToDevPortalRequest
+	var req api.PublishToDevPortalRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		status, errorResp := utils.GetErrorResponse(err)
 		c.JSON(status, errorResp)
@@ -419,17 +468,17 @@ func (h *APIHandler) PublishToDevPortal(c *gin.Context) {
 	}
 
 	// Log successful publish
-	log.Printf("[APIHandler] API %s published successfully to DevPortal %s", apiID, req.DevPortalUUID)
+	h.slogger.Info("API published successfully to DevPortal", "apiID", apiID, "devPortalUUID", utils.OpenAPIUUIDToString(req.DevPortalUuid))
 
 	// Return success response
-	c.JSON(http.StatusOK, dto.CommonResponse{
+	c.JSON(http.StatusOK, api.CommonResponse{
 		Success:   true,
 		Message:   "API published successfully to DevPortal",
 		Timestamp: time.Now(),
 	})
 }
 
-// UnpublishFromDevPortal handles POST /api/v1/apis/:apiId/devportals/unpublish
+// UnpublishFromDevPortal handles POST /api/v1/rest-apis/:apiId/devportals/unpublish
 //
 // This endpoint unpublishes an API from a specific DevPortal by deleting it.
 // The API must exist in platform-api and the specified DevPortal must exist.
@@ -451,7 +500,7 @@ func (h *APIHandler) UnpublishFromDevPortal(c *gin.Context) {
 	}
 
 	// Parse request body
-	var req dto.UnpublishFromDevPortalRequest
+	var req api.UnpublishFromDevPortalRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		status, errorResp := utils.GetErrorResponse(err)
 		c.JSON(status, errorResp)
@@ -459,7 +508,7 @@ func (h *APIHandler) UnpublishFromDevPortal(c *gin.Context) {
 	}
 
 	// Unpublish API from DevPortal through service layer
-	err := h.apiService.UnpublishAPIFromDevPortalByHandle(apiID, req.DevPortalUUID, orgID)
+	err := h.apiService.UnpublishAPIFromDevPortalByHandle(apiID, utils.OpenAPIUUIDToString(req.DevPortalUuid), orgID)
 	if err != nil {
 		status, errorResp := utils.GetErrorResponse(err)
 		c.JSON(status, errorResp)
@@ -467,17 +516,17 @@ func (h *APIHandler) UnpublishFromDevPortal(c *gin.Context) {
 	}
 
 	// Log successful unpublish
-	log.Printf("[APIHandler] API %s unpublished successfully from DevPortal %s", apiID, req.DevPortalUUID)
+	h.slogger.Info("API unpublished successfully from DevPortal", "apiID", apiID, "devPortalUUID", utils.OpenAPIUUIDToString(req.DevPortalUuid))
 
 	// Return success response
-	c.JSON(http.StatusOK, dto.CommonResponse{
+	c.JSON(http.StatusOK, api.CommonResponse{
 		Success:   true,
 		Message:   "API unpublished successfully from DevPortal",
 		Timestamp: time.Now(),
 	})
 }
 
-// GetAPIPublications handles GET /api/v1/apis/:apiId/publications
+// GetAPIPublications handles GET /api/v1/rest-apis/:apiId/publications
 //
 // This endpoint retrieves all DevPortals associated with an API including publication details.
 func (h *APIHandler) GetAPIPublications(c *gin.Context) {
@@ -501,13 +550,14 @@ func (h *APIHandler) GetAPIPublications(c *gin.Context) {
 	if err != nil {
 		// Handle specific errors
 		if errors.Is(err, constants.ErrAPINotFound) {
+			h.slogger.Error("API not found", "apiID", apiID, "organizationId", orgID)
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
 				"API not found"))
 			return
 		}
 
 		// Internal server error
-		log.Printf("[APIHandler] Failed to get publications for API %s: %v", apiID, err)
+		h.slogger.Error("Failed to get publications for API", "apiID", apiID, "organizationId", orgID, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to retrieve API publications"))
 		return
@@ -526,14 +576,14 @@ func (h *APIHandler) ImportAPIProject(c *gin.Context) {
 		return
 	}
 
-	var req dto.ImportAPIProjectRequest
+	var req api.ImportAPIProjectRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
 		return
 	}
 
 	// Validate required fields
-	if req.RepoURL == "" {
+	if req.RepoUrl == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"Repository URL is required"))
 		return
@@ -548,22 +598,22 @@ func (h *APIHandler) ImportAPIProject(c *gin.Context) {
 			"Path is required"))
 		return
 	}
-	if req.API.Name == "" {
+	if req.Api.Name == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"API name is required"))
 		return
 	}
-	if req.API.Context == "" {
+	if req.Api.Context == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"API context is required"))
 		return
 	}
-	if req.API.Version == "" {
+	if req.Api.Version == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"API version is required"))
 		return
 	}
-	if req.API.ProjectID == "" {
+	if req.Api.ProjectId == (openapi_types.UUID{}) {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"Project ID is required"))
 		return
@@ -573,7 +623,7 @@ func (h *APIHandler) ImportAPIProject(c *gin.Context) {
 	gitService := service.NewGitService()
 
 	// Import API project
-	api, err := h.apiService.ImportAPIProject(&req, orgId, gitService)
+	apiResponse, err := h.apiService.ImportAPIProject(&req, orgId, gitService)
 	if err != nil {
 		if errors.Is(err, constants.ErrAPIProjectNotFound) {
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "API Project Not Found",
@@ -626,25 +676,25 @@ func (h *APIHandler) ImportAPIProject(c *gin.Context) {
 			return
 		}
 
-		log.Printf("Failed to import API project: %v", err)
+		h.slogger.Error("Failed to import API project", "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to import API project"))
 		return
 	}
 
-	c.JSON(http.StatusCreated, api)
+	c.JSON(http.StatusCreated, apiResponse)
 }
 
 // ValidateAPIProject handles POST /validate/api-project
 func (h *APIHandler) ValidateAPIProject(c *gin.Context) {
-	var req dto.ValidateAPIProjectRequest
+	var req api.ValidateAPIProjectRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
 		return
 	}
 
 	// Validate required fields
-	if req.RepoURL == "" {
+	if req.RepoUrl == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"Repository URL is required"))
 		return
@@ -685,28 +735,32 @@ func (h *APIHandler) ValidateOpenAPI(c *gin.Context) {
 		return
 	}
 
-	var req dto.ValidateOpenAPIRequest
+	var req api.ValidateOpenAPIRequest
+	var definitionHeader *multipart.FileHeader
 
 	// Get URL from form if provided
 	if url := c.PostForm("url"); url != "" {
-		req.URL = url
+		req.Url = &url
 	}
 
 	// Get definition file from form if provided
 	if file, header, err := c.Request.FormFile("definition"); err == nil {
-		req.Definition = header
+		definitionHeader = header
+		var openapiFile openapi_types.File
+		openapiFile.InitFromMultipart(header)
+		req.Definition = &openapiFile
 		defer file.Close()
 	}
 
 	// Validate that at least one input is provided
-	if req.URL == "" && req.Definition == nil {
+	if req.Url == nil && req.Definition == nil {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"Either URL or definition file must be provided"))
 		return
 	}
 
 	// Validate OpenAPI definition
-	response, err := h.apiService.ValidateOpenAPIDefinition(&req)
+	response, err := h.apiService.ValidateOpenAPIDefinition(req.Url, definitionHeader)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to validate OpenAPI definition"))
@@ -734,21 +788,25 @@ func (h *APIHandler) ImportOpenAPI(c *gin.Context) {
 		return
 	}
 
-	var req dto.ImportOpenAPIRequest
+	var req api.ImportOpenAPIRequest
+	var definitionHeader *multipart.FileHeader
 
 	// Get URL from form if provided
 	if url := c.PostForm("url"); url != "" {
-		req.URL = url
+		req.Url = &url
 	}
 
 	// Get definition file from form if provided
 	if file, header, err := c.Request.FormFile("definition"); err == nil {
-		req.Definition = header
+		definitionHeader = header
+		var openapiFile openapi_types.File
+		openapiFile.InitFromMultipart(header)
+		req.Definition = &openapiFile
 		defer file.Close()
 	}
 
 	// Validate that at least one input is provided
-	if req.URL == "" && req.Definition == nil {
+	if req.Url == nil && req.Definition == nil {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"Either URL or definition file must be provided"))
 		return
@@ -761,37 +819,39 @@ func (h *APIHandler) ImportOpenAPI(c *gin.Context) {
 			"API details are required"))
 		return
 	}
+	req.Api = apiJSON
 
 	// Parse API details from JSON string
-	if err := json.Unmarshal([]byte(apiJSON), &req.API); err != nil {
+	var apiDetails api.RESTAPI
+	if err := json.Unmarshal([]byte(apiJSON), &apiDetails); err != nil {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"Invalid API details: "+err.Error()))
 		return
 	}
 
-	if req.API.Name == "" {
+	if apiDetails.Name == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"API name is required"))
 		return
 	}
-	if req.API.Context == "" {
+	if apiDetails.Context == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"API context is required"))
 		return
 	}
-	if req.API.Version == "" {
+	if apiDetails.Version == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"API version is required"))
 		return
 	}
-	if req.API.ProjectID == "" {
+	if apiDetails.ProjectId == (openapi_types.UUID{}) {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"Project ID is required"))
 		return
 	}
 
 	// Import API from OpenAPI definition
-	api, err := h.apiService.ImportFromOpenAPI(&req, orgId)
+	apiResponse, err := h.apiService.ImportFromOpenAPI(&apiDetails, req.Url, definitionHeader, orgId)
 	if err != nil {
 		if errors.Is(err, constants.ErrAPIAlreadyExists) {
 			c.JSON(http.StatusConflict, utils.NewErrorResponse(409, "Conflict",
@@ -861,10 +921,10 @@ func (h *APIHandler) ImportOpenAPI(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, api)
+	c.JSON(http.StatusCreated, apiResponse)
 }
 
-// ValidateAPI handles GET /api/v1/apis/validate
+// ValidateAPI handles GET /api/v1/rest-apis/validate
 func (h *APIHandler) ValidateAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -873,20 +933,32 @@ func (h *APIHandler) ValidateAPI(c *gin.Context) {
 		return
 	}
 
-	var req dto.APIValidationRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	var params api.ValidateRESTAPIParams
+	if err := c.ShouldBindQuery(&params); err != nil {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
 		return
 	}
 
 	// Validate that either identifier OR both name and version are provided
-	if req.Identifier == "" && (req.Name == "" || req.Version == "") {
+	identifier := ""
+	name := ""
+	version := ""
+	if params.Identifier != nil {
+		identifier = string(*params.Identifier)
+	}
+	if params.Name != nil {
+		name = string(*params.Name)
+	}
+	if params.Version != nil {
+		version = string(*params.Version)
+	}
+	if identifier == "" && (name == "" || version == "") {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"Either 'identifier' or both 'name' and 'version' query parameters are required"))
 		return
 	}
 
-	response, err := h.apiService.ValidateAPI(&req, orgId)
+	response, err := h.apiService.ValidateAPI(&params, orgId)
 	if err != nil {
 		if errors.Is(err, constants.ErrOrganizationNotFound) {
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
@@ -904,8 +976,9 @@ func (h *APIHandler) ValidateAPI(c *gin.Context) {
 
 // RegisterRoutes registers all API routes
 func (h *APIHandler) RegisterRoutes(r *gin.Engine) {
+	h.slogger.Debug("Registering REST API routes")
 	// API routes
-	apiGroup := r.Group("/api/v1/apis")
+	apiGroup := r.Group("/api/v1/rest-apis")
 	{
 		apiGroup.POST("", h.CreateAPI)
 		apiGroup.GET("", h.ListAPIs)
@@ -922,11 +995,21 @@ func (h *APIHandler) RegisterRoutes(r *gin.Engine) {
 	importGroup := r.Group("/api/v1/import")
 	{
 		importGroup.POST("/api-project", h.ImportAPIProject)
-		importGroup.POST("/open-api", h.ImportOpenAPI)
+		importGroup.POST("/openapi", h.ImportOpenAPI)
 	}
 	validateGroup := r.Group("/api/v1/validate")
 	{
 		validateGroup.POST("/api-project", h.ValidateAPIProject)
-		validateGroup.POST("/open-api", h.ValidateOpenAPI)
+		validateGroup.POST("/openapi", h.ValidateOpenAPI)
 	}
+}
+
+func isEmptyUpstreamDefinition(definition api.UpstreamDefinition) bool {
+	if definition.Url != nil && *definition.Url != "" {
+		return false
+	}
+	if definition.Ref != nil && *definition.Ref != "" {
+		return false
+	}
+	return true
 }

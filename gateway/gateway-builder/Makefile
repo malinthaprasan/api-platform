@@ -39,7 +39,6 @@ help: ## Show this help message
 	@echo ''
 	@echo 'Build Targets:'
 	@echo '  make build                     - Build Docker image using buildx'
-	@echo '  make build-local               - Build Docker image locally (faster)'
 	@echo '  make push                      - Push Docker image to registry'
 	@echo '  make build-and-push-multiarch  - Build and push multi-arch Docker image'
 	@echo ''
@@ -58,9 +57,10 @@ help: ## Show this help message
 build: ## Build Docker image using buildx
 	@echo "Building Docker image ($(IMAGE_NAME):$(VERSION))..."
 	@docker buildx build -f Dockerfile \
-		--build-context policy-engine=../policy-engine \
+		--build-context policy-engine=../gateway-runtime/policy-engine \
 		--build-context system-policies=../system-policies \
 		--build-context sdk=../../sdk \
+		--build-context common=../../common \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		-t $(IMAGE_NAME):$(VERSION) \
@@ -68,18 +68,6 @@ build: ## Build Docker image using buildx
 		--load \
 		.
 
-.PHONY: build-local
-build-local: ## Build Docker image locally (faster, no buildx)
-	@echo "Building Docker image locally ($(IMAGE_NAME):$(VERSION))..."
-	@DOCKER_BUILDKIT=1 docker build -f Dockerfile \
-		--build-context policy-engine=../policy-engine \
-		--build-context system-policies=../system-policies \
-		--build-context sdk=../../sdk \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
-		-t $(IMAGE_NAME):$(VERSION) \
-		-t $(IMAGE_NAME):latest \
-		.
 
 .PHONY: push
 push: ## Push Docker image to registry
@@ -91,9 +79,10 @@ push: ## Push Docker image to registry
 build-and-push-multiarch: ## Build and push multi-architecture Docker image (linux/amd64, linux/arm64)
 	@echo "Building and pushing multi-arch Docker image: $(IMAGE_NAME):$(VERSION)"
 	docker buildx build -f Dockerfile \
-		--build-context policy-engine=../policy-engine \
+		--build-context policy-engine=../gateway-runtime/policy-engine \
 		--build-context system-policies=../system-policies \
 		--build-context sdk=../../sdk \
+		--build-context common=../../common \
 		--platform linux/amd64,linux/arm64 \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
@@ -106,7 +95,7 @@ build-and-push-multiarch: ## Build and push multi-architecture Docker image (lin
 .PHONY: test
 test: ## Run tests
 	@echo "Running tests..."
-	@go test -v ./... -cover -coverprofile=unit-test-coverage.txt
+	@go test -v $$(go list ./... | grep -v /testutils) -cover -coverprofile=unit-test-coverage.txt
 
 .PHONY: tidy
 tidy: ## Run go mod tidy

@@ -18,11 +18,17 @@
 package service
 
 import (
+	"reflect"
 	"testing"
 
+	"platform-api/src/api"
 	"platform-api/src/internal/constants"
 	"platform-api/src/internal/model"
 	"platform-api/src/internal/repository"
+	"platform-api/src/internal/utils"
+
+	"github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // mockAPIRepository is a mock implementation of the APIRepository interface
@@ -51,16 +57,16 @@ func (m *mockAPIRepository) CheckAPIExistsByNameAndVersionInOrganization(name, v
 // TestValidateUpdateAPIRequest tests the validateUpdateAPIRequest method
 func TestValidateUpdateAPIRequest(t *testing.T) {
 	tests := []struct {
-		name                    string
-		existingAPI             *model.API
-		req                     *UpdateAPIRequest
-		mockHandleExists        bool
-		mockHandleError         error
-		mockNameVersionExists   bool
-		mockNameVersionError    error
-		wantErr                 bool
-		expectedErr             error
-		expectedExcludeHandle   string
+		name                      string
+		existingAPI               *model.API
+		req                       *api.UpdateRESTAPIRequest
+		mockHandleExists          bool
+		mockHandleError           error
+		mockNameVersionExists     bool
+		mockNameVersionError      error
+		wantErr                   bool
+		expectedErr               error
+		expectedExcludeHandle     string
 		verifyExcludeHandleCalled bool
 	}{
 		{
@@ -69,7 +75,7 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 				Handle:  "my-api",
 				Version: "v1",
 			},
-			req:     &UpdateAPIRequest{},
+			req:     &api.UpdateRESTAPIRequest{},
 			wantErr: false,
 		},
 		{
@@ -78,7 +84,7 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 				Handle:  "my-api",
 				Version: "v1",
 			},
-			req:                       &UpdateAPIRequest{Name: ptr("Updated Name")},
+			req:                       &api.UpdateRESTAPIRequest{Name: "Updated Name"},
 			mockNameVersionExists:     false,
 			wantErr:                   false,
 			expectedExcludeHandle:     "my-api",
@@ -90,7 +96,7 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 				Handle:  "my-api",
 				Version: "v1",
 			},
-			req:                   &UpdateAPIRequest{Name: ptr("Conflicting Name")},
+			req:                   &api.UpdateRESTAPIRequest{Name: "Conflicting Name"},
 			mockNameVersionExists: true,
 			wantErr:               true,
 			expectedErr:           constants.ErrAPINameVersionAlreadyExists,
@@ -101,7 +107,7 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 				Handle:  "my-api",
 				Version: "v1",
 			},
-			req:         &UpdateAPIRequest{LifeCycleStatus: ptr("INVALID_STATE")},
+			req:         &api.UpdateRESTAPIRequest{LifeCycleStatus: statusPtr("INVALID_STATE")},
 			wantErr:     true,
 			expectedErr: constants.ErrInvalidLifecycleState,
 		},
@@ -111,7 +117,7 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 				Handle:  "my-api",
 				Version: "v1",
 			},
-			req:         &UpdateAPIRequest{Type: ptr("INVALID_TYPE")},
+			req:         &api.UpdateRESTAPIRequest{Kind: ptr("INVALID_TYPE")},
 			wantErr:     true,
 			expectedErr: constants.ErrInvalidAPIType,
 		},
@@ -121,7 +127,7 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 				Handle:  "my-api",
 				Version: "v1",
 			},
-			req:         &UpdateAPIRequest{Transport: slicePtr([]string{"invalid"})},
+			req:         &api.UpdateRESTAPIRequest{Transport: slicePtr([]string{"invalid"})},
 			wantErr:     true,
 			expectedErr: constants.ErrInvalidTransport,
 		},
@@ -131,7 +137,7 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 				Handle:  "my-api",
 				Version: "v1",
 			},
-			req:     &UpdateAPIRequest{LifeCycleStatus: ptr("PUBLISHED")},
+			req:     &api.UpdateRESTAPIRequest{LifeCycleStatus: statusPtr("PUBLISHED")},
 			wantErr: false,
 		},
 		{
@@ -140,7 +146,7 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 				Handle:  "my-api",
 				Version: "v1",
 			},
-			req:     &UpdateAPIRequest{Type: ptr("HTTP")},
+			req:     &api.UpdateRESTAPIRequest{Kind: ptr("RestApi")},
 			wantErr: false,
 		},
 		{
@@ -149,7 +155,7 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 				Handle:  "my-api",
 				Version: "v1",
 			},
-			req:     &UpdateAPIRequest{Transport: slicePtr([]string{"https"})},
+			req:     &api.UpdateRESTAPIRequest{Transport: slicePtr([]string{"https"})},
 			wantErr: false,
 		},
 	}
@@ -191,26 +197,29 @@ func TestValidateUpdateAPIRequest(t *testing.T) {
 
 // TestValidateCreateAPIRequest tests the validateCreateAPIRequest method
 func TestValidateCreateAPIRequest(t *testing.T) {
+	projectID := openapi_types.UUID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
+
 	tests := []struct {
-		name                      string
-		req                       *CreateAPIRequest
-		mockHandleExists          bool
-		mockHandleError           error
-		mockNameVersionExists     bool
-		mockNameVersionError      error
-		wantErr                   bool
-		expectedErr               error
-		errContains               string
-		verifyExcludeHandleEmpty  bool
-		expectedExcludeHandle     string
+		name                     string
+		req                      *api.CreateRESTAPIRequest
+		mockHandleExists         bool
+		mockHandleError          error
+		mockNameVersionExists    bool
+		mockNameVersionError     error
+		wantErr                  bool
+		expectedErr              error
+		errContains              string
+		verifyExcludeHandleEmpty bool
+		expectedExcludeHandle    string
 	}{
 		{
 			name: "valid create request",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "Test API",
 				Context:   "/test",
 				Version:   "v1",
-				ProjectID: "proj-123",
+				ProjectId: projectID,
+				Upstream:  api.Upstream{},
 			},
 			mockNameVersionExists:    false,
 			wantErr:                  false,
@@ -219,12 +228,13 @@ func TestValidateCreateAPIRequest(t *testing.T) {
 		},
 		{
 			name: "handle already exists",
-			req: &CreateAPIRequest{
-				ID:        "my-handle",
+			req: &api.CreateRESTAPIRequest{
+				Id:        ptr("my-handle"),
 				Name:      "Test API",
 				Context:   "/test",
 				Version:   "v1",
-				ProjectID: "proj-123",
+				ProjectId: projectID,
+				Upstream:  api.Upstream{},
 			},
 			mockHandleExists: true,
 			wantErr:          true,
@@ -232,11 +242,12 @@ func TestValidateCreateAPIRequest(t *testing.T) {
 		},
 		{
 			name: "name version already exists",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "Test API",
 				Context:   "/test",
 				Version:   "v1",
-				ProjectID: "proj-123",
+				ProjectId: projectID,
+				Upstream:  api.Upstream{},
 			},
 			mockNameVersionExists:    true,
 			wantErr:                  true,
@@ -246,92 +257,100 @@ func TestValidateCreateAPIRequest(t *testing.T) {
 		},
 		{
 			name: "missing name",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "",
 				Context:   "/test",
 				Version:   "v1",
-				ProjectID: "proj-123",
+				ProjectId: projectID,
+				Upstream:  api.Upstream{},
 			},
 			wantErr:     true,
 			expectedErr: constants.ErrInvalidAPIName,
 		},
 		{
 			name: "missing project id",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "Test API",
 				Context:   "/test",
 				Version:   "v1",
-				ProjectID: "",
+				ProjectId: openapi_types.UUID{},
+				Upstream:  api.Upstream{},
 			},
 			wantErr:     true,
 			errContains: "project id is required",
 		},
 		{
 			name: "invalid context",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "Test API",
 				Context:   "invalid",
 				Version:   "v1",
-				ProjectID: "proj-123",
+				ProjectId: projectID,
+				Upstream:  api.Upstream{},
 			},
 			wantErr:     true,
 			expectedErr: constants.ErrInvalidAPIContext,
 		},
 		{
 			name: "invalid version",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "Test API",
 				Context:   "/test",
 				Version:   "",
-				ProjectID: "proj-123",
+				ProjectId: projectID,
+				Upstream:  api.Upstream{},
 			},
 			wantErr:     true,
 			expectedErr: constants.ErrInvalidAPIVersion,
 		},
 		{
 			name: "invalid lifecycle state",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:            "Test API",
 				Context:         "/test",
 				Version:         "v1",
-				ProjectID:       "proj-123",
-				LifeCycleStatus: "INVALID_STATE",
+				ProjectId:       projectID,
+				LifeCycleStatus: createStatusPtr("INVALID_STATE"),
+				Upstream:        api.Upstream{},
 			},
 			wantErr:     true,
 			expectedErr: constants.ErrInvalidLifecycleState,
 		},
 		{
 			name: "invalid api type",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "Test API",
 				Context:   "/test",
 				Version:   "v1",
-				ProjectID: "proj-123",
-				Type:      "INVALID_TYPE",
+				ProjectId: projectID,
+				Kind:      ptr("INVALID_TYPE"),
+				Upstream:  api.Upstream{},
 			},
 			wantErr:     true,
 			expectedErr: constants.ErrInvalidAPIType,
 		},
 		{
 			name: "invalid transport",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "Test API",
 				Context:   "/test",
 				Version:   "v1",
-				ProjectID: "proj-123",
-				Transport: []string{"invalid"},
+				ProjectId: projectID,
+				Transport: slicePtr([]string{"invalid"}),
+				Upstream:  api.Upstream{},
 			},
 			wantErr:     true,
 			expectedErr: constants.ErrInvalidTransport,
 		},
 		{
 			name: "valid lifecycle state",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:            "Test API",
 				Context:         "/test",
 				Version:         "v1",
-				ProjectID:       "proj-123",
-				LifeCycleStatus: "PUBLISHED",
+				ProjectId:       projectID,
+				LifeCycleStatus: createStatusPtr("PUBLISHED"),
+				Upstream:        api.Upstream{},
 			},
 			mockNameVersionExists:    false,
 			wantErr:                  false,
@@ -340,12 +359,13 @@ func TestValidateCreateAPIRequest(t *testing.T) {
 		},
 		{
 			name: "valid api type",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "Test API",
 				Context:   "/test",
 				Version:   "v1",
-				ProjectID: "proj-123",
-				Type:      "HTTP",
+				ProjectId: projectID,
+				Kind:      ptr("RestApi"),
+				Upstream:  api.Upstream{},
 			},
 			mockNameVersionExists:    false,
 			wantErr:                  false,
@@ -354,12 +374,13 @@ func TestValidateCreateAPIRequest(t *testing.T) {
 		},
 		{
 			name: "valid transport",
-			req: &CreateAPIRequest{
+			req: &api.CreateRESTAPIRequest{
 				Name:      "Test API",
 				Context:   "/test",
 				Version:   "v1",
-				ProjectID: "proj-123",
-				Transport: []string{"https"},
+				ProjectId: projectID,
+				Transport: slicePtr([]string{"https"}),
+				Upstream:  api.Upstream{},
 			},
 			mockNameVersionExists:    false,
 			wantErr:                  false,
@@ -406,6 +427,55 @@ func TestValidateCreateAPIRequest(t *testing.T) {
 	}
 }
 
+func TestApplyAPIUpdatesUpdatesPolicies(t *testing.T) {
+	service := &APIService{
+		apiRepo: &mockAPIRepository{},
+		apiUtil: &utils.APIUtil{},
+	}
+
+	condition := "request.path == '/pets'"
+	params := map[string]interface{}{"limit": 10}
+	newPolicies := []api.Policy{
+		{
+			ExecutionCondition: &condition,
+			Name:               "rate-limit",
+			Params:             &params,
+			Version:            "v1",
+		},
+	}
+	updatedPolicies := []api.Policy{
+		{
+			ExecutionCondition: &condition,
+			Name:               "rate-limit",
+			Params:             &params,
+			Version:            "v1",
+		},
+	}
+
+	existing := &model.API{
+		Handle:    "pets-api",
+		ProjectID: "11111111-1111-1111-1111-111111111111",
+		Version:   "v1",
+		Configuration: model.RestAPIConfig{
+			Policies: []model.Policy{
+				{Name: "legacy-policy", Version: "v1"},
+			},
+		},
+	}
+
+	updated, err := service.applyAPIUpdates(existing, &api.UpdateRESTAPIRequest{Policies: &newPolicies}, "org-1")
+	if err != nil {
+		t.Fatalf("applyAPIUpdates() error = %v", err)
+	}
+
+	if updated.Policies == nil {
+		t.Fatalf("updated policies = nil, want %v", updatedPolicies)
+	}
+	if !reflect.DeepEqual(*updated.Policies, updatedPolicies) {
+		t.Errorf("updated policies = %v, want %v", *updated.Policies, updatedPolicies)
+	}
+}
+
 // Helper functions
 
 // ptr creates a string pointer
@@ -416,6 +486,16 @@ func ptr(s string) *string {
 // slicePtr creates a string slice pointer
 func slicePtr(s []string) *[]string {
 	return &s
+}
+
+func statusPtr(s string) *api.RESTAPILifeCycleStatus {
+	status := api.RESTAPILifeCycleStatus(s)
+	return &status
+}
+
+func createStatusPtr(s string) *api.CreateRESTAPIRequestLifeCycleStatus {
+	status := api.CreateRESTAPIRequestLifeCycleStatus(s)
+	return &status
 }
 
 // Note: contains() and findSubstring() helper functions are defined in gateway_test.go

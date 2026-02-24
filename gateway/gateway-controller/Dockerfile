@@ -1,17 +1,22 @@
 # Stage 1: Build the Go application
 # Using Debian-based image for better cross-compilation support
-FROM --platform=$BUILDPLATFORM golang:1.25.5-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.7-bookworm AS builder
 ARG TARGETARCH
-
-# Build arguments for version information
 ARG VERSION=0.0.1-SNAPSHOT
 ARG GIT_COMMIT=unknown
 
+# Coverage build argument - set to "true" for coverage-instrumented builds
+ARG ENABLE_COVERAGE=false
+
+# Debug build argument - set to "true" for debug builds with dlv support (disables optimizations)
+ARG ENABLE_DEBUG=false
+
 WORKDIR /build
 
-# Install build dependencies for SQLite (CGO requirement)
-# Install cross-compilation toolchains based on target architecture
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install build dependencies for SQLite (CGO) and cross-compilation toolchains
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libc6-dev \
     libsqlite3-dev \
@@ -19,8 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         apt-get install -y --no-install-recommends gcc-x86-64-linux-gnu libc6-dev-amd64-cross; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
         apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross; \
-    fi \
-    && rm -rf /var/lib/apt/lists/*
+    fi
 
 # Copy go mod files for dependencies (needed for go.mod replace directive)
 # Copying only the mod files first ensures that the go mod download cache 
@@ -28,64 +32,112 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=sdk go.mod go.sum /sdk/
 COPY --from=common go.mod go.sum /common/
 
-# Copy main component go mod files
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
-# Copy full source code for SDK and Common
 COPY --from=sdk . /sdk
 COPY --from=common . /common
-
-# Copy component source code
 COPY . ./
 
-# Build the binary with CGO enabled (required for mattn/go-sqlite3)
-# Set CC for cross-compilation based on target architecture
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
+# Build with CGO (required for SQLite), set CC for cross-compilation, add -cover/-gcflags if enabled
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    if [ "$TARGETARCH" = "amd64" ]; then \
         export CC=x86_64-linux-gnu-gcc; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
         export CC=aarch64-linux-gnu-gcc; \
     else \
         export CC=gcc; \
     fi && \
-    CGO_ENABLED=1 \
-    GOOS=linux \
-    GOARCH=${TARGETARCH} \
-    go build -a \
-    -ldflags "-X main.Version=${VERSION} \
-              -X main.GitCommit=${GIT_COMMIT} \
-              -X main.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    -o controller cmd/controller/main.go
+    if [ "$ENABLE_COVERAGE" = "true" ]; then \
+        COVER_FLAG="-cover"; \
+    else \
+        COVER_FLAG=""; \
+    fi && \
+    export CGO_ENABLED=1 && \
+    export GOOS=linux && \
+    export GOARCH=${TARGETARCH} && \
+    BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
+    if [ "$ENABLE_DEBUG" = "true" ]; then \
+        go build $COVER_FLAG \
+        -gcflags "all=-N -l" \
+        -ldflags "-X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildDate=${BUILD_DATE}" \
+        -o controller cmd/controller/main.go; \
+    else \
+        go build $COVER_FLAG \
+        -ldflags "-X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildDate=${BUILD_DATE}" \
+        -o controller cmd/controller/main.go; \
+    fi
 
-# Stage 2: Create minimal runtime image
-# Using Debian slim for glibc compatibility with builder stage
-FROM debian:bookworm-slim
+# Stage: debug (select with --target debug; NOT part of the default build)
+# Full Go image needed to install dlv via go install; acceptable for dev-only use.
+# Runs as root — dlv requires ptrace; container security settings handle isolation.
+FROM golang:1.25.7-bookworm AS debug
+WORKDIR /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install dlv (Delve debugger)
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go install github.com/go-delve/delve/cmd/dlv@v1.26.0
+
+# Copy debug-compiled binary and required runtime assets
+COPY --from=builder /build/controller .
+COPY default-policies /app/default-policies
+COPY lua /app/lua
+COPY default-llm-provider-templates /app/default-llm-provider-templates
+RUN mkdir -p /app/data
+
+EXPOSE 2345 9090 18000
+
+# Run controller under dlv in headless mode, waiting for debugger attach on :2345
+ENTRYPOINT ["/go/bin/dlv", "exec", "/app/controller", \
+            "--listen=:2345", "--headless=true", \
+            "--api-version=2", "--accept-multiclient", "--"]
+
+# Stage 2: Runtime image (Debian slim for glibc compatibility)
+FROM debian:bookworm-slim AS production
+
+# Re-declare ARGs after FROM to use them in this stage
+ARG VERSION=0.0.1-SNAPSHOT
+ARG ENABLE_COVERAGE=false
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
+    wget
 
 WORKDIR /app
 
-# Copy binary from builder
 COPY --from=builder /build/controller .
-
-# Copy default configuration file
-
-
-# Copy policy definitions
 COPY default-policies /app/default-policies
-
-# Copy default llm provider templates
+COPY lua /app/lua
 COPY default-llm-provider-templates /app/default-llm-provider-templates
 
-# Create data directory for SQLite database
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && \
+    if [ "$ENABLE_COVERAGE" = "true" ]; then mkdir -p /coverage; fi
 
-# Expose ports
+RUN groupadd -r -g 10001 wso2 && \
+    useradd -r -u 10001 -g wso2 -s /sbin/nologin -c "WSO2 Application User" wso2 && \
+    chown -R wso2:wso2 /app/data && \
+    chmod -R 755 /app/data && \
+    if [ "$ENABLE_COVERAGE" = "true" ]; then \
+        chown -R wso2:wso2 /coverage && \
+        chmod -R 755 /coverage; \
+    fi
+
+# Set GOCOVERDIR for coverage data collection (only effective when binary is built with -cover)
+ENV GOCOVERDIR=/coverage
+
+USER wso2
+
 EXPOSE 9090 18000
 
-# Run the application
+# Metadata labels
+LABEL org.opencontainers.image.title="API Platform Gateway Controller"
+LABEL org.opencontainers.image.description="API Platform Gateway Controller with xDS control plane"
+LABEL org.opencontainers.image.vendor="WSO2"
+LABEL org.opencontainers.image.version="${VERSION}"
+
 ENTRYPOINT ["/app/controller"]

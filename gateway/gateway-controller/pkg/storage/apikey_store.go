@@ -29,11 +29,11 @@ import (
 
 // APIKeyStore manages API keys in memory with thread-safe operations
 type APIKeyStore struct {
-	mu              sync.RWMutex
-	apiKeys         map[string]*models.APIKey            // key: configID:APIKeyName → Value: *APIKey
-	apiKeysByAPI    map[string]map[string]*models.APIKey // Key: configID → Value: map[keyID]*APIKey
-	resourceVersion int64
-	logger          *slog.Logger
+	mu               sync.RWMutex
+	apiKeys          map[string]*models.APIKey            // key: configID:APIKeyName → Value: *APIKey
+	apiKeysByAPI     map[string]map[string]*models.APIKey // Key: configID → Value: map[keyID]*APIKey
+	resourceVersion  int64
+	logger           *slog.Logger
 }
 
 // NewAPIKeyStore creates a new API key store

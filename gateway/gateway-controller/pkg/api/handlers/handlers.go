@@ -21,7 +21,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/wso2/api-platform/common/constants"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/apikeyxds"
@@ -38,6 +40,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	commonmodels "github.com/wso2/api-platform/common/models"
+	adminapi "github.com/wso2/api-platform/gateway/gateway-controller/pkg/adminapi/generated"
 	api "github.com/wso2/api-platform/gateway/gateway-controller/pkg/api/generated"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/api/middleware"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/config"
@@ -45,6 +48,7 @@ import (
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/lazyresourcexds"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/metrics"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/models"
+	policybuilder "github.com/wso2/api-platform/gateway/gateway-controller/pkg/policy"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/policyxds"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/storage"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/utils"
@@ -90,7 +94,9 @@ func NewAPIServer(
 	apiKeyXDSManager *apikeyxds.APIKeyStateManager,
 	systemConfig *config.Config,
 ) *APIServer {
-	deploymentService := utils.NewAPIDeploymentService(store, db, snapshotManager, validator, &systemConfig.GatewayController.Router)
+	deploymentService := utils.NewAPIDeploymentService(store, db, snapshotManager, validator, &systemConfig.Router)
+	policyVersionResolver := utils.NewLoadedPolicyVersionResolver(policyDefinitions)
+	policyValidator := config.NewPolicyValidator(policyDefinitions)
 	server := &APIServer{
 		store:                store,
 		db:                   db,
@@ -103,12 +109,12 @@ func NewAPIServer(
 		deploymentService:    deploymentService,
 		mcpDeploymentService: utils.NewMCPDeploymentService(store, db, snapshotManager),
 		llmDeploymentService: utils.NewLLMDeploymentService(store, db, snapshotManager, lazyResourceManager, templateDefinitions,
-			deploymentService, &systemConfig.GatewayController.Router),
+			deploymentService, &systemConfig.Router, policyVersionResolver, policyValidator),
 		apiKeyService: utils.NewAPIKeyService(store, db, apiKeyXDSManager,
-			&systemConfig.GatewayController.APIKey),
+			&systemConfig.APIKey),
 		apiKeyXDSManager:   apiKeyXDSManager,
 		controlPlaneClient: controlPlaneClient,
-		routerConfig:       &systemConfig.GatewayController.Router,
+		routerConfig:       &systemConfig.Router,
 		httpClient:         &http.Client{Timeout: 10 * time.Second},
 		systemConfig:       systemConfig,
 	}
@@ -176,6 +182,24 @@ func (s *APIServer) HealthCheck(c *gin.Context) {
 	})
 }
 
+// GetXDSSyncStatus implements the GET /xds_sync_status endpoint.
+func (s *APIServer) GetXDSSyncStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, s.GetXDSSyncStatusResponse())
+}
+
+// GetXDSSyncStatusResponse builds the xDS sync status response payload.
+func (s *APIServer) GetXDSSyncStatusResponse() adminapi.XDSSyncStatusResponse {
+	timestamp := time.Now()
+	component := "gateway-controller"
+	policyChainVersion := s.getPolicyChainVersionString()
+
+	return adminapi.XDSSyncStatusResponse{
+		Component:          &component,
+		Timestamp:          &timestamp,
+		PolicyChainVersion: &policyChainVersion,
+	}
+}
+
 // CreateAPI implements ServerInterface.CreateAPI
 // (POST /apis)
 func (s *APIServer) CreateAPI(c *gin.Context) {
@@ -217,6 +241,20 @@ func (s *APIServer) CreateAPI(c *gin.Context) {
 			c.JSON(http.StatusConflict, api.ErrorResponse{
 				Status:  "error",
 				Message: err.Error(),
+			})
+		} else if validationErr := new(utils.ValidationErrorListError); errors.As(err, &validationErr) {
+			errors := make([]api.ValidationError, len(validationErr.Errors))
+			for i, e := range validationErr.Errors {
+				errors[i] = api.ValidationError{
+					Field:   stringPtr(e.Field),
+					Message: stringPtr(e.Message),
+				}
+			}
+
+			c.JSON(http.StatusBadRequest, api.ErrorResponse{
+				Status:  "error",
+				Message: "Configuration validation failed",
+				Errors:  &errors,
 			})
 		} else {
 			c.JSON(http.StatusBadRequest, api.ErrorResponse{
@@ -261,8 +299,15 @@ func (s *APIServer) CreateAPI(c *gin.Context) {
 			// API was updated and no longer has policies, remove the existing policy configuration
 			policyID := result.StoredConfig.ID + "-policies"
 			if err := s.policyManager.RemovePolicy(policyID); err != nil {
-				// Log at debug level since policy may not exist if API never had policies
-				log.Debug("No policy configuration to remove", slog.String("policy_id", policyID))
+				// Only treat "policy not found" as non-error (API may never have had policies)
+				// Other errors (storage failures, snapshot update failures) should be logged as errors
+				if storage.IsPolicyNotFoundError(err) {
+					log.Debug("No policy configuration to remove", slog.String("policy_id", policyID))
+				} else {
+					log.Error("Failed to remove policy configuration",
+						slog.Any("error", err),
+						slog.String("policy_id", policyID))
+				}
 			} else {
 				log.Info("Derived policy configuration removed (API no longer has policies)",
 					slog.String("policy_id", policyID))
@@ -365,9 +410,9 @@ func (s *APIServer) SearchDeployments(c *gin.Context, kind string) {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"status":      "success",
-			"count":       len(mcpItems),
-			"mcp_proxies": mcpItems,
+			"status":     "success",
+			"count":      len(mcpItems),
+			"mcpProxies": mcpItems,
 		})
 	} else {
 		// Return API format
@@ -428,14 +473,14 @@ func (s *APIServer) GetAPIByNameVersion(c *gin.Context, name string, version str
 		"id":            cfg.GetHandle(),
 		"configuration": cfg.Configuration,
 		"metadata": gin.H{
-			"status":     string(cfg.Status),
-			"created_at": cfg.CreatedAt.Format(time.RFC3339),
-			"updated_at": cfg.UpdatedAt.Format(time.RFC3339),
+			"status":    string(cfg.Status),
+			"createdAt": cfg.CreatedAt.Format(time.RFC3339),
+			"updatedAt": cfg.UpdatedAt.Format(time.RFC3339),
 		},
 	}
 
 	if cfg.DeployedAt != nil {
-		apiDetail["metadata"].(gin.H)["deployed_at"] = cfg.DeployedAt.Format(time.RFC3339)
+		apiDetail["metadata"].(gin.H)["deployedAt"] = cfg.DeployedAt.Format(time.RFC3339)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -486,14 +531,14 @@ func (s *APIServer) GetAPIById(c *gin.Context, id string) {
 		"id":            cfg.GetHandle(),
 		"configuration": cfg.Configuration,
 		"metadata": gin.H{
-			"status":     string(cfg.Status),
-			"created_at": cfg.CreatedAt.Format(time.RFC3339),
-			"updated_at": cfg.UpdatedAt.Format(time.RFC3339),
+			"status":    string(cfg.Status),
+			"createdAt": cfg.CreatedAt.Format(time.RFC3339),
+			"updatedAt": cfg.UpdatedAt.Format(time.RFC3339),
 		},
 	}
 
 	if cfg.DeployedAt != nil {
-		apiDetail["metadata"].(gin.H)["deployed_at"] = cfg.DeployedAt.Format(time.RFC3339)
+		apiDetail["metadata"].(gin.H)["deployedAt"] = cfg.DeployedAt.Format(time.RFC3339)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -535,7 +580,7 @@ func (s *APIServer) UpdateAPI(c *gin.Context, id string) {
 		metrics.ValidationErrorsTotal.WithLabelValues(operation, "parse_failed").Inc()
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{
 			Status:  "error",
-			Message: "Failed to parse configuration",
+			Message: fmt.Sprintf("Failed to parse configuration: %v", err),
 		})
 		return
 	}
@@ -1069,8 +1114,8 @@ func (s *APIServer) GetLLMProviderTemplateById(c *gin.Context, id string) {
 		"id":            id,
 		"configuration": template.Configuration,
 		"metadata": gin.H{
-			"created_at": template.CreatedAt,
-			"updated_at": template.UpdatedAt,
+			"createdAt": template.CreatedAt,
+			"updatedAt": template.UpdatedAt,
 		},
 	}
 
@@ -1210,6 +1255,13 @@ func (s *APIServer) CreateLLMProvider(c *gin.Context) {
 	})
 	if err != nil {
 		log.Error("Failed to create LLM provider", slog.Any("error", err))
+		if utils.IsPolicyDefinitionMissingError(err) {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+				Status:  "error",
+				Message: utils.PolicyDefinitionMissingUserMessage,
+			})
+			return
+		}
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Status: "error", Message: err.Error()})
 		return
 	}
@@ -1264,14 +1316,14 @@ func (s *APIServer) GetLLMProviderById(c *gin.Context, id string) {
 	providerDetail := gin.H{
 		"configuration": cfg.SourceConfiguration,
 		"metadata": gin.H{
-			"status":     string(cfg.Status),
-			"created_at": cfg.CreatedAt.Format(time.RFC3339),
-			"updated_at": cfg.UpdatedAt.Format(time.RFC3339),
+			"status":    string(cfg.Status),
+			"createdAt": cfg.CreatedAt.Format(time.RFC3339),
+			"updatedAt": cfg.UpdatedAt.Format(time.RFC3339),
 		},
 	}
 
 	if cfg.DeployedAt != nil {
-		providerDetail["metadata"].(gin.H)["deployed_at"] = cfg.DeployedAt.Format(time.RFC3339)
+		providerDetail["metadata"].(gin.H)["deployedAt"] = cfg.DeployedAt.Format(time.RFC3339)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1308,6 +1360,13 @@ func (s *APIServer) UpdateLLMProvider(c *gin.Context, id string) {
 	})
 	if err != nil {
 		log.Error("Failed to update LLM provider configuration", slog.Any("error", err))
+		if utils.IsPolicyDefinitionMissingError(err) {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+				Status:  "error",
+				Message: utils.PolicyDefinitionMissingUserMessage,
+			})
+			return
+		}
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Status: "error", Message: err.Error()})
 		return
 	}
@@ -1410,7 +1469,7 @@ func (s *APIServer) ListLLMProxies(c *gin.Context, params api.ListLLMProxiesPara
 			Id:          stringPtr(proxy.Metadata.Name),
 			DisplayName: stringPtr(proxy.Spec.DisplayName),
 			Version:     stringPtr(proxy.Spec.Version),
-			Provider:    stringPtr(proxy.Spec.Provider),
+			Provider:    stringPtr(proxy.Spec.Provider.Id),
 			Status:      &status,
 			CreatedAt:   timePtr(cfg.CreatedAt),
 			UpdatedAt:   timePtr(cfg.UpdatedAt),
@@ -1447,6 +1506,13 @@ func (s *APIServer) CreateLLMProxy(c *gin.Context) {
 	})
 	if err != nil {
 		log.Error("Failed to create LLM proxy", slog.Any("error", err))
+		if utils.IsPolicyDefinitionMissingError(err) {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+				Status:  "error",
+				Message: utils.PolicyDefinitionMissingUserMessage,
+			})
+			return
+		}
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Status: "error", Message: err.Error()})
 		return
 	}
@@ -1501,14 +1567,14 @@ func (s *APIServer) GetLLMProxyById(c *gin.Context, id string) {
 	proxyDetail := gin.H{
 		"configuration": cfg.SourceConfiguration,
 		"metadata": gin.H{
-			"status":     string(cfg.Status),
-			"created_at": cfg.CreatedAt.Format(time.RFC3339),
-			"updated_at": cfg.UpdatedAt.Format(time.RFC3339),
+			"status":    string(cfg.Status),
+			"createdAt": cfg.CreatedAt.Format(time.RFC3339),
+			"updatedAt": cfg.UpdatedAt.Format(time.RFC3339),
 		},
 	}
 
 	if cfg.DeployedAt != nil {
-		proxyDetail["metadata"].(gin.H)["deployed_at"] = cfg.DeployedAt.Format(time.RFC3339)
+		proxyDetail["metadata"].(gin.H)["deployedAt"] = cfg.DeployedAt.Format(time.RFC3339)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1545,6 +1611,13 @@ func (s *APIServer) UpdateLLMProxy(c *gin.Context, id string) {
 	})
 	if err != nil {
 		log.Error("Failed to update LLM proxy configuration", slog.Any("error", err))
+		if utils.IsPolicyDefinitionMissingError(err) {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+				Status:  "error",
+				Message: utils.PolicyDefinitionMissingUserMessage,
+			})
+			return
+		}
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Status: "error", Message: err.Error()})
 		return
 	}
@@ -1649,180 +1722,29 @@ func (s *APIServer) ListPolicies(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// buildStoredPolicyFromAPI constructs a StoredPolicyConfig from an API config
-// Merging rules: When operation has policies, they define the order (can reorder, override, or extend API policies).
-// Remaining API-level policies not mentioned in operation policies are appended at the end.
-// When operation has no policies, API-level policies are used in their declared order.
-// RouteKey uses the fully qualified route path (context + operation path) and must match the route name format
-// used by the xDS translator for consistency.
+// buildStoredPolicyFromAPI constructs a StoredPolicyConfig from an API config.
+// This is a thread-safe wrapper around policybuilder.DerivePolicyFromAPIConfig that handles
+// locking for the policyDefinitions map.
+//
+// Policy execution order: System Policies -> API Level Policies -> Operation Level Policies
+// Each level does not override the previous one; policies are executed in the given order.
 func (s *APIServer) buildStoredPolicyFromAPI(cfg *models.StoredConfig) *models.StoredPolicyConfig {
-	// TODO: (renuka) duplicate buildStoredPolicyFromAPI funcs. Refactor this.
-	apiCfg := &cfg.Configuration
-
-	// Collect API-level policies
-	apiPolicies := make(map[string]policyenginev1.PolicyInstance) // name -> policy
-	if cfg.GetPolicies() != nil {
-		for _, p := range *cfg.GetPolicies() {
-			apiPolicies[p.Name] = convertAPIPolicy(p, policy.LevelAPI)
-		}
+	// Copy policy definitions under lock to ensure thread safety
+	// (safe if map is ever mutated from another goroutine)
+	s.policyDefMu.RLock()
+	defsCopy := make(map[string]api.PolicyDefinition, len(s.policyDefinitions))
+	for k, v := range s.policyDefinitions {
+		defsCopy[k] = v
 	}
+	s.policyDefMu.RUnlock()
 
-	routes := make([]policyenginev1.PolicyChain, 0)
-	switch apiCfg.Kind {
-	case api.WebSubApi:
-		// Build routes with merged policies
-		apiData, err := apiCfg.Spec.AsWebhookAPIData()
-		if err != nil {
-			// Handle error appropriately (e.g., log or return)
-			return nil
-		}
-		for _, ch := range apiData.Channels {
-			var finalPolicies []policyenginev1.PolicyInstance
-
-			if len(*ch.Policies) > 0 {
-				// Operation has policies: use operation policy order as authoritative
-				// This allows operations to reorder, override, or extend API-level policies
-				finalPolicies = make([]policyenginev1.PolicyInstance, 0, len(*ch.Policies))
-				addedNames := make(map[string]struct{})
-
-				for _, opPolicy := range *ch.Policies {
-					finalPolicies = append(finalPolicies, convertAPIPolicy(opPolicy, policy.LevelRoute))
-					addedNames[opPolicy.Name] = struct{}{}
-				}
-
-				// Add any API-level policies not mentioned in operation policies (append at end)
-				if apiData.Policies != nil {
-					for _, apiPolicy := range *apiData.Policies {
-						if _, exists := addedNames[apiPolicy.Name]; !exists {
-							finalPolicies = append(finalPolicies, apiPolicies[apiPolicy.Name])
-						}
-					}
-				}
-			} else {
-				// No operation policies: use API-level policies in their declared order
-				if apiData.Policies != nil {
-					finalPolicies = make([]policyenginev1.PolicyInstance, 0, len(*apiData.Policies))
-					for _, p := range *apiData.Policies {
-						finalPolicies = append(finalPolicies, apiPolicies[p.Name])
-					}
-				}
-			}
-
-			routeKey := xds.GenerateRouteName("SUB", apiData.Context, apiData.Version, ch.Name, s.routerConfig.GatewayHost)
-
-			// Inject system policies into the chain
-			props := make(map[string]any)
-			injectedPolicies := utils.InjectSystemPolicies(finalPolicies, s.systemConfig, props)
-
-			routes = append(routes, policyenginev1.PolicyChain{
-				RouteKey: routeKey,
-				Policies: injectedPolicies,
-			})
-		}
-	case api.RestApi:
-		// Build routes with merged policies
-		apiData, err := apiCfg.Spec.AsAPIConfigData()
-		if err != nil {
-			// Handle error appropriately (e.g., log or return)
-			return nil
-		}
-		for _, op := range apiData.Operations {
-			var finalPolicies []policyenginev1.PolicyInstance
-
-			if op.Policies != nil && len(*op.Policies) > 0 {
-				// Operation has policies: use operation policy order as authoritative
-				// This allows operations to reorder, override, or extend API-level policies
-				finalPolicies = make([]policyenginev1.PolicyInstance, 0, len(*op.Policies))
-				addedNames := make(map[string]struct{})
-
-				for _, opPolicy := range *op.Policies {
-					finalPolicies = append(finalPolicies, convertAPIPolicy(opPolicy, policy.LevelRoute))
-					addedNames[opPolicy.Name] = struct{}{}
-				}
-
-				// Add any API-level policies not mentioned in operation policies (append at end)
-				if apiData.Policies != nil {
-					for _, apiPolicy := range *apiData.Policies {
-						if _, exists := addedNames[apiPolicy.Name]; !exists {
-							finalPolicies = append(finalPolicies, apiPolicies[apiPolicy.Name])
-						}
-					}
-				}
-			} else {
-				// No operation policies: use API-level policies in their declared order
-				if apiData.Policies != nil {
-					finalPolicies = make([]policyenginev1.PolicyInstance, 0, len(*apiData.Policies))
-					for _, p := range *apiData.Policies {
-						finalPolicies = append(finalPolicies, apiPolicies[p.Name])
-					}
-				}
-			}
-
-			// Determine effective vhosts (fallback to global router defaults when not provided)
-			effectiveMainVHost := s.routerConfig.VHosts.Main.Default
-			effectiveSandboxVHost := s.routerConfig.VHosts.Sandbox.Default
-			if apiData.Vhosts != nil {
-				if strings.TrimSpace(apiData.Vhosts.Main) != "" {
-					effectiveMainVHost = apiData.Vhosts.Main
-				}
-				if apiData.Vhosts.Sandbox != nil && strings.TrimSpace(*apiData.Vhosts.Sandbox) != "" {
-					effectiveSandboxVHost = *apiData.Vhosts.Sandbox
-				}
-			}
-
-			vhosts := []string{effectiveMainVHost}
-			if apiData.Upstream.Sandbox != nil && apiData.Upstream.Sandbox.Url != nil &&
-				strings.TrimSpace(*apiData.Upstream.Sandbox.Url) != "" {
-				vhosts = append(vhosts, effectiveSandboxVHost)
-			}
-
-			// Populate props for system policies
-			props := make(map[string]any)
-			s.populatePropsForSystemPolicies(cfg.SourceConfiguration, props)
-
-			// If this is an LLM provider, get the template and pass it to analytics policy
-			for _, vhost := range vhosts {
-				// Inject system policies into the chain
-				injectedPolicies := utils.InjectSystemPolicies(finalPolicies, s.systemConfig, props)
-
-				routes = append(routes, policyenginev1.PolicyChain{
-					RouteKey: xds.GenerateRouteName(string(op.Method), apiData.Context, apiData.Version, op.Path, vhost),
-					Policies: injectedPolicies,
-				})
-			}
-		}
-	}
-
-	// If there are no policies at all (including system policies), return nil (skip creation)
-	policyCount := 0
-	for _, r := range routes {
-		policyCount += len(r.Policies)
-	}
-	if policyCount == 0 {
-		return nil
-	}
-
-	now := time.Now().Unix()
-	stored := &models.StoredPolicyConfig{
-		ID: cfg.ID + "-policies",
-		Configuration: policyenginev1.Configuration{
-			Routes: routes,
-			Metadata: policyenginev1.Metadata{
-				CreatedAt:       now,
-				UpdatedAt:       now,
-				ResourceVersion: 0,
-				APIName:         cfg.GetDisplayName(),
-				Version:         cfg.GetVersion(),
-				Context:         cfg.GetContext(),
-			},
-		},
-		Version: 0,
-	}
-	return stored
+	// Use the centralized, bug-fixed implementation from pkg/policy
+	return policybuilder.DerivePolicyFromAPIConfig(cfg, s.routerConfig, s.systemConfig, defsCopy)
 }
 
-// convertAPIPolicy converts generated api.Policy to policyenginev1.PolicyInstance
-func convertAPIPolicy(p api.Policy, attachedTo policy.Level) policyenginev1.PolicyInstance {
+// convertAPIPolicy converts generated api.Policy to policyenginev1.PolicyInstance.
+// resolvedVersion is the full semver (e.g. v1.0.0) to send to the policy engine.
+func convertAPIPolicy(p api.Policy, attachedTo policy.Level, resolvedVersion string) policyenginev1.PolicyInstance {
 	paramsMap := make(map[string]interface{})
 	if p.Params != nil {
 		for k, v := range *p.Params {
@@ -1837,7 +1759,7 @@ func convertAPIPolicy(p api.Policy, attachedTo policy.Level) policyenginev1.Poli
 
 	return policyenginev1.PolicyInstance{
 		Name:               p.Name,
-		Version:            p.Version,
+		Version:            resolvedVersion,
 		Enabled:            true, // Default to enabled
 		ExecutionCondition: p.ExecutionCondition,
 		Parameters:         paramsMap,
@@ -1959,9 +1881,9 @@ func (s *APIServer) ListMCPProxies(c *gin.Context, params api.ListMCPProxiesPara
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":      "success",
-		"count":       len(items),
-		"mcp_proxies": items,
+		"status":     "success",
+		"count":      len(items),
+		"mcpProxies": items,
 	})
 }
 
@@ -2020,14 +1942,14 @@ func (s *APIServer) GetMCPProxyById(c *gin.Context, id string) {
 		"id":            cfg.GetHandle(),
 		"configuration": cfg.SourceConfiguration,
 		"metadata": gin.H{
-			"status":     string(cfg.Status),
-			"created_at": cfg.CreatedAt.Format(time.RFC3339),
-			"updated_at": cfg.UpdatedAt.Format(time.RFC3339),
+			"status":    string(cfg.Status),
+			"createdAt": cfg.CreatedAt.Format(time.RFC3339),
+			"updatedAt": cfg.UpdatedAt.Format(time.RFC3339),
 		},
 	}
 
 	if cfg.DeployedAt != nil {
-		mcpDetail["metadata"].(gin.H)["deployed_at"] = cfg.DeployedAt.Format(time.RFC3339)
+		mcpDetail["metadata"].(gin.H)["deployedAt"] = cfg.DeployedAt.Format(time.RFC3339)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -2210,10 +2132,10 @@ func (s *APIServer) waitForDeploymentAndNotify(configID string, correlationID st
 				// Extract API ID from stored config (use config ID as API ID)
 				apiID := configID
 
-				// Use empty revision ID for now (can be made configurable later)
-				revisionID := ""
+				// Use empty deployment ID for now (can be made configurable later)
+				deploymentID := ""
 
-				if err := s.controlPlaneClient.NotifyAPIDeployment(apiID, cfg, revisionID); err != nil {
+				if err := s.controlPlaneClient.NotifyAPIDeployment(apiID, cfg, deploymentID); err != nil {
 					log.Error("Failed to notify platform-api of successful deployment",
 						slog.String("api_id", apiID),
 						slog.Any("error", err))
@@ -2239,11 +2161,32 @@ func (s *APIServer) GetConfigDump(c *gin.Context) {
 	log := middleware.GetLogger(c, s.logger)
 	log.Info("Retrieving configuration dump")
 
+	response, err := s.BuildConfigDumpResponse(log)
+	if err != nil {
+		log.Error("Failed to retrieve configuration dump", slog.Any("error", err))
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+			Status:  "error",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, *response)
+	log.Info("Configuration dump retrieved successfully",
+		slog.Int("apis", len(*response.Apis)),
+		slog.Int("policies", len(*response.Policies)),
+		slog.Int("certificates", len(*response.Certificates)))
+}
+
+// BuildConfigDumpResponse builds the complete configuration dump response payload.
+func (s *APIServer) BuildConfigDumpResponse(log *slog.Logger) (*adminapi.ConfigDumpResponse, error) {
+	log.Info("Retrieving configuration dump")
+
 	// Get all APIs
 	allConfigs := s.store.GetAll()
 
 	// Build API list with metadata using the generated types
-	apisSlice := make([]api.ConfigDumpAPIItem, 0, len(allConfigs))
+	apisSlice := make([]adminapi.ConfigDumpAPIItem, 0, len(allConfigs))
 
 	for _, cfg := range allConfigs {
 		// Use handle (metadata.name) as the id in the dump
@@ -2254,22 +2197,29 @@ func (s *APIServer) GetConfigDump(c *gin.Context) {
 		}
 
 		// Convert status to the correct type
-		var status api.ConfigDumpAPIMetadataStatus
+		var status adminapi.ConfigDumpAPIMetadataStatus
 		switch cfg.Status {
 		case models.StatusDeployed:
-			status = api.ConfigDumpAPIMetadataStatusDeployed
+			status = adminapi.Deployed
 		case models.StatusFailed:
-			status = api.ConfigDumpAPIMetadataStatusFailed
+			status = adminapi.Failed
 		case models.StatusPending:
-			status = api.ConfigDumpAPIMetadataStatusPending
+			status = adminapi.Pending
+		case models.StatusUndeployed:
+			status = adminapi.Undeployed
 		default:
-			status = api.ConfigDumpAPIMetadataStatusPending
+			status = adminapi.Pending
 		}
 
-		item := api.ConfigDumpAPIItem{
-			Configuration: &cfg.Configuration,
+		configuration, err := toGenericMap(cfg.Configuration)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert API configuration: %w", err)
+		}
+
+		item := adminapi.ConfigDumpAPIItem{
+			Configuration: &configuration,
 			Id:            convertHandleToUUID(configHandle),
-			Metadata: &api.ConfigDumpAPIMetadata{
+			Metadata: &adminapi.ConfigDumpAPIMetadata{
 				CreatedAt:  &cfg.CreatedAt,
 				UpdatedAt:  &cfg.UpdatedAt,
 				DeployedAt: cfg.DeployedAt,
@@ -2281,22 +2231,31 @@ func (s *APIServer) GetConfigDump(c *gin.Context) {
 
 	// Get all policies (excluding system policies)
 	s.policyDefMu.RLock()
-	policies := make([]api.PolicyDefinition, 0, len(s.policyDefinitions))
+	policies := make([]map[string]interface{}, 0, len(s.policyDefinitions))
 	for _, policy := range s.policyDefinitions {
-		policies = append(policies, policy)
+		policyMap, err := toGenericMap(policy)
+		if err != nil {
+			s.policyDefMu.RUnlock()
+			return nil, fmt.Errorf("failed to convert policy definition: %w", err)
+		}
+		policies = append(policies, policyMap)
 	}
 	s.policyDefMu.RUnlock()
 
 	// Sort policies for consistent output
 	sort.Slice(policies, func(i, j int) bool {
-		if policies[i].Name == policies[j].Name {
-			return policies[i].Version < policies[j].Version
+		nameI, _ := policies[i]["name"].(string)
+		nameJ, _ := policies[j]["name"].(string)
+		if nameI == nameJ {
+			versionI, _ := policies[i]["version"].(string)
+			versionJ, _ := policies[j]["version"].(string)
+			return versionI < versionJ
 		}
-		return policies[i].Name < policies[j].Name
+		return nameI < nameJ
 	})
 
 	// Get all certificates
-	var certificates []api.CertificateResponse
+	var certificates []adminapi.CertificateResponse
 	totalBytes := 0
 
 	if s.db == nil {
@@ -2305,19 +2264,14 @@ func (s *APIServer) GetConfigDump(c *gin.Context) {
 	} else {
 		certs, err := s.db.ListCertificates()
 		if err != nil {
-			log.Error("Failed to retrieve certificates", slog.Any("error", err))
-			c.JSON(http.StatusInternalServerError, api.ErrorResponse{
-				Status:  "error",
-				Message: "Failed to retrieve certificates",
-			})
-			return
+			return nil, fmt.Errorf("failed to retrieve certificates: %w", err)
 		}
 
 		for _, cert := range certs {
 			totalBytes += len(cert.Certificate)
 
-			certStatus := api.CertificateResponseStatus("success")
-			certificates = append(certificates, api.CertificateResponse{
+			certStatus := "success"
+			certificates = append(certificates, adminapi.CertificateResponse{
 				Id:       &cert.ID,
 				Name:     &cert.Name,
 				Subject:  &cert.Subject,
@@ -2336,9 +2290,10 @@ func (s *APIServer) GetConfigDump(c *gin.Context) {
 
 	timestamp := time.Now()
 	status := "success"
+	policyChainVersion := s.getPolicyChainVersionString()
 
 	// Build response
-	response := api.ConfigDumpResponse{
+	response := &adminapi.ConfigDumpResponse{
 		Status:       &status,
 		Timestamp:    &timestamp,
 		Apis:         &apisSlice,
@@ -2355,38 +2310,45 @@ func (s *APIServer) GetConfigDump(c *gin.Context) {
 			TotalCertificates:     &totalCertificates,
 			TotalCertificateBytes: &totalBytes,
 		},
+		XdsSync: &adminapi.ConfigDumpXDSSync{
+			PolicyChainVersion: &policyChainVersion,
+		},
 	}
 
-	c.JSON(http.StatusOK, response)
-	log.Info("Configuration dump retrieved successfully",
-		slog.Int("apis", len(apisSlice)),
-		slog.Int("policies", len(policies)),
-		slog.Int("certificates", len(certificates)))
+	return response, nil
 }
 
-// GenerateAPIKey implements ServerInterface.GenerateAPIKey
+func (s *APIServer) getPolicyChainVersionString() string {
+	if s.policyManager == nil {
+		return "0"
+	}
+	return strconv.FormatInt(s.policyManager.GetResourceVersion(), 10)
+}
+
+// CreateAPIKey implements ServerInterface.CreateAPIKey
 // (POST /apis/{id}/api-keys)
-func (s *APIServer) GenerateAPIKey(c *gin.Context, id string) {
+// Handles both local key generation and external key injection based on request payload
+func (s *APIServer) CreateAPIKey(c *gin.Context, id string) {
 	// Get correlation-aware logger from context
 	log := middleware.GetLogger(c, s.logger)
 	handle := id
 	correlationID := middleware.GetCorrelationID(c)
 
 	// Extract authenticated user from context
-	user, ok := s.extractAuthenticatedUser(c, "GenerateAPIKey", correlationID)
+	user, ok := s.extractAuthenticatedUser(c, "CreateAPIKey", correlationID)
 	if !ok {
 		return // Error response already sent by extractAuthenticatedUser
 	}
 
-	log.Debug("Starting API key generation",
+	log.Debug("Starting API key creation by generating or injecting a new key",
 		slog.String("handle", handle),
 		slog.String("user", user.UserID),
 		slog.String("correlation_id", correlationID))
 
 	// Parse and validate request body
-	var request api.APIKeyGenerationRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		log.Warn("Invalid request body for API key generation",
+	var request api.APIKeyCreationRequest
+	if err := s.bindRequestBody(c, &request); err != nil {
+		log.Error("Failed to parse request body for API key creation",
 			slog.Any("error", err),
 			slog.String("handle", handle),
 			slog.String("correlation_id", correlationID))
@@ -2398,7 +2360,7 @@ func (s *APIServer) GenerateAPIKey(c *gin.Context, id string) {
 	}
 
 	// Prepare parameters
-	params := utils.APIKeyGenerationParams{
+	params := utils.APIKeyCreationParams{
 		Handle:        handle,
 		Request:       request,
 		User:          user,
@@ -2406,11 +2368,16 @@ func (s *APIServer) GenerateAPIKey(c *gin.Context, id string) {
 		Logger:        log,
 	}
 
-	result, err := s.apiKeyService.GenerateAPIKey(params)
+	result, err := s.apiKeyService.CreateAPIKey(params)
 	if err != nil {
 		// Check error type to determine appropriate status code
 		if strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, api.ErrorResponse{
+				Status:  "error",
+				Message: err.Error(),
+			})
+		} else if storage.IsConflictError(err) || strings.Contains(err.Error(), "already exists") {
+			c.JSON(http.StatusConflict, api.ErrorResponse{
 				Status:  "error",
 				Message: err.Error(),
 			})
@@ -2423,7 +2390,7 @@ func (s *APIServer) GenerateAPIKey(c *gin.Context, id string) {
 		return
 	}
 
-	log.Info("API key generation completed",
+	log.Info("API key creation completed",
 		slog.String("handle", handle),
 		slog.String("key name", result.Response.ApiKey.Name),
 		slog.String("user", user.UserID),
@@ -2488,6 +2455,95 @@ func (s *APIServer) RevokeAPIKey(c *gin.Context, id string, apiKeyName string) {
 	c.JSON(http.StatusOK, result.Response)
 }
 
+// UpdateAPIKey implements ServerInterface.UpdateAPIKey
+// (PUT /apis/{id}/api-keys/{apiKeyName})
+func (s *APIServer) UpdateAPIKey(c *gin.Context, id string, apiKeyName string) {
+	// Get correlation-aware logger from context
+	log := middleware.GetLogger(c, s.logger)
+	handle := id
+	correlationID := middleware.GetCorrelationID(c)
+
+	// Extract authenticated user from context
+	user, ok := s.extractAuthenticatedUser(c, "UpdateAPIKey", correlationID)
+	if !ok {
+		return // Error response already sent by extractAuthenticatedUser
+	}
+
+	log.Debug("Starting API key update",
+		slog.String("handle", handle),
+		slog.String("key_name", apiKeyName),
+		slog.String("user", user.UserID),
+		slog.String("correlation_id", correlationID))
+
+	// Parse and validate request body
+	var request api.APIKeyCreationRequest
+	if err := s.bindRequestBody(c, &request); err != nil {
+		log.Warn("Invalid request body for API key update",
+			slog.Any("error", err),
+			slog.String("handle", handle),
+			slog.String("correlation_id", correlationID))
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Status:  "error",
+			Message: fmt.Sprintf("Invalid request body: %v", err),
+		})
+		return
+	}
+
+	// If API key is not provided, return an error
+	if request.ApiKey == nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Status:  "error",
+			Message: "API key value is required",
+		})
+		return
+	}
+
+	// Prepare parameters
+	params := utils.APIKeyUpdateParams{
+		Handle:        handle,
+		APIKeyName:    apiKeyName,
+		Request:       request,
+		User:          user,
+		CorrelationID: correlationID,
+		Logger:        log,
+	}
+
+	result, err := s.apiKeyService.UpdateAPIKey(params)
+	if err != nil {
+		// Check error type to determine appropriate status code
+		if storage.IsOperationNotAllowedError(err) {
+			c.JSON(http.StatusBadRequest, api.ErrorResponse{
+				Status:  "error",
+				Message: err.Error(),
+			})
+		} else if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, api.ErrorResponse{
+				Status:  "error",
+				Message: err.Error(),
+			})
+		} else if storage.IsConflictError(err) || strings.Contains(err.Error(), "already exists") {
+			c.JSON(http.StatusConflict, api.ErrorResponse{
+				Status:  "error",
+				Message: err.Error(),
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+				Status:  "error",
+				Message: err.Error(),
+			})
+		}
+		return
+	}
+
+	log.Info("API key updated successfully",
+		slog.String("handle", handle),
+		slog.String("key_name", apiKeyName),
+		slog.String("user", user.UserID),
+		slog.String("correlation_id", correlationID))
+
+	c.JSON(http.StatusOK, result.Response)
+}
+
 // RegenerateAPIKey implements ServerInterface.RegenerateAPIKey
 // (POST /apis/{id}/api-keys/{apiKeyName}/regenerate)
 func (s *APIServer) RegenerateAPIKey(c *gin.Context, id string, apiKeyName string) {
@@ -2510,7 +2566,7 @@ func (s *APIServer) RegenerateAPIKey(c *gin.Context, id string, apiKeyName strin
 
 	// Parse and validate request body
 	var request api.APIKeyRegenerationRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
+	if err := s.bindRequestBody(c, &request); err != nil {
 		log.Warn("Invalid request body for API key rotation",
 			slog.Any("error", err),
 			slog.String("handle", handle),
@@ -2551,11 +2607,10 @@ func (s *APIServer) RegenerateAPIKey(c *gin.Context, id string, apiKeyName strin
 
 	log.Info("API key rotation completed",
 		slog.String("handle", handle),
-		slog.String("key name", apiKeyName),
+		slog.String("key_name", apiKeyName),
 		slog.String("user", user.UserID),
 		slog.String("correlation_id", correlationID))
 
-	// Return the response using the generated schema
 	c.JSON(http.StatusOK, result.Response)
 }
 
@@ -2652,6 +2707,29 @@ func (s *APIServer) extractAuthenticatedUser(c *gin.Context, operationName strin
 	return &user, true
 }
 
+// bindRequestBody binds the request body based on Content-Type header.
+// Supports both JSON and YAML content types.
+// Handles Content-Type headers case-insensitively and strips parameters (e.g., charset).
+func (s *APIServer) bindRequestBody(c *gin.Context, request interface{}) error {
+	contentType := c.GetHeader("Content-Type")
+
+	// Normalize the Content-Type: trim whitespace, split off parameters, and convert to lowercase
+	contentType = strings.TrimSpace(contentType)
+	if idx := strings.Index(contentType, ";"); idx != -1 {
+		contentType = contentType[:idx]
+	}
+	contentType = strings.TrimSpace(contentType)
+	contentType = strings.ToLower(contentType)
+
+	// Check for YAML content types (case-insensitive, normalized)
+	if contentType == "application/yaml" || contentType == "text/yaml" {
+		return c.ShouldBindYAML(request)
+	}
+
+	// Default to JSON for application/json or when no content type is specified
+	return c.ShouldBindJSON(request)
+}
+
 // getLLMProviderTemplate extracts the template name from sourceConfig and retrieves the template.
 // Returns the template configuration if found, nil otherwise.
 func (s *APIServer) getLLMProviderTemplate(sourceConfig any) (*api.LLMProviderTemplate, error) {
@@ -2690,4 +2768,16 @@ func (s *APIServer) populatePropsForSystemPolicies(srcConfig any, props map[stri
 	}
 	// Template handle is now extracted and added to route metadata in translator.go
 	// No need to pass template via props anymore
+}
+
+func toGenericMap(value interface{}) (map[string]interface{}, error) {
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(bytes, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }

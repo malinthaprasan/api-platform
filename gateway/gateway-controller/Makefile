@@ -28,7 +28,7 @@ LDFLAGS := -X main.Version=$(VERSION) -X main.GitCommit=$(GIT_COMMIT) -X main.Bu
 DOCKER_REGISTRY ?= ghcr.io/wso2/api-platform
 IMAGE_NAME := $(DOCKER_REGISTRY)/gateway-controller
 
-.PHONY: help generate build build-local test generate-listener-certs push build-coverage-image
+.PHONY: help generate build test generate-listener-certs push build-coverage-image build-debug
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -39,6 +39,8 @@ help: ## Show this help message
 generate: ## Generate API server code from OpenAPI spec
 	@echo "Generating API server code from OpenAPI spec..."
 	@go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.1 --config=oapi-codegen.yaml api/openapi.yaml
+	@echo "Generating admin API models from OpenAPI admin spec..."
+	@go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.1 --config=oapi-codegen-admin.yaml api/openapi-admin.yaml
 test: ## Run unit and integration tests
 	@echo "Running tests..."
 	@go test -v ./... -cover -coverprofile=unit-test-coverage.txt
@@ -50,21 +52,12 @@ build: generate test ## Build Docker image using buildx
 		--build-context common=../../common \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--target production \
 		-t $(IMAGE_NAME):$(VERSION) \
 		-t $(IMAGE_NAME):latest \
 		--load \
 		.
 
-build-local: generate ## Build Docker image locally (faster, no buildx)
-	@echo "Building Docker image locally ($(IMAGE_NAME):$(VERSION))..."
-	DOCKER_BUILDKIT=1 docker build -f Dockerfile \
-		--build-context sdk=../../sdk \
-		--build-context common=../../common \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
-		-t $(IMAGE_NAME):$(VERSION) \
-		-t $(IMAGE_NAME):latest \
-		.
 
 push: ## Push Docker image to registry
 	@echo "Pushing Docker images..."
@@ -79,18 +72,34 @@ build-and-push-multiarch: ## Build and push multi-architecture Docker image (lin
 		--platform linux/amd64,linux/arm64 \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--target production \
 		-t $(IMAGE_NAME):$(VERSION) \
 		-t $(IMAGE_NAME):latest \
 		--push \
 		.
 
 build-coverage-image: test ## Build coverage-instrumented gateway-controller image
-	docker buildx build -f Dockerfile.coverage \
+	docker buildx build -f Dockerfile \
 		--build-context sdk=../../sdk \
 		--build-context common=../../common \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg ENABLE_COVERAGE=true \
+		--target production \
 		-t $(IMAGE_NAME)-coverage:$(VERSION) \
+		--load \
+		.
+
+build-debug: ## Build debug image for remote debugging with dlv (VS Code attach on port 2345)
+	docker buildx build -f Dockerfile \
+		--build-context sdk=../../sdk \
+		--build-context common=../../common \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg ENABLE_DEBUG=true \
+		--target debug \
+		-t $(IMAGE_NAME)-debug:$(VERSION) \
+		-t $(IMAGE_NAME)-debug:latest \
 		--load \
 		.
 

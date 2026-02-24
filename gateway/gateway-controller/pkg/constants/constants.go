@@ -19,6 +19,7 @@
 package constants
 
 const (
+	PlatformGatewayId = "platform-gateway-id"
 	// XDS/Envoy Constants
 	TransportSocketPrefix   = "ts"
 	LoadBalancerIDKey       = "lb_id"
@@ -54,8 +55,8 @@ const (
 	DefaultMatchID          = "0"
 
 	// Configuration Validation Constants
-	MaxReasonableTimeoutSeconds  = uint32(3600)  // 1 hour in seconds
-	MaxReasonablePolicyTimeoutMs = uint32(60000) // 60 seconds in milliseconds
+	MaxReasonableTimeoutMs       = uint32(3600000) // 1 hour in milliseconds
+	MaxReasonablePolicyTimeoutMs = uint32(60000)   // 60 seconds in milliseconds
 
 	// Cipher Suite Validation
 	CipherInvalidChars1 = ";"
@@ -70,6 +71,7 @@ const (
 	// External Processor (ext_proc) Filter
 	ExtProcFilterName                    = "api_platform.policy_engine.envoy.filters.http.ext_proc"
 	ExtProcConfigType                    = "type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor"
+	ExtProcMetadataNamespace             = ExtProcFilterName
 	ExtProcRouteCacheActionDefault       = "DEFAULT"
 	ExtProcRouteCacheActionRetain        = "RETAIN"
 	ExtProcRouteCacheActionClear         = "CLEAR"
@@ -80,10 +82,13 @@ const (
 	ExtProcRequestAttributeRouteMetadata = "xds.route_metadata"
 
 	// Policy Engine
-	PolicyEngineClusterName = "api-platform/policy-engine"
+	PolicyEngineClusterName       = "api-platform/policy-engine"
+	DefaultPolicyEngineSocketPath = "/var/run/api-platform/policy-engine.sock"
 
 	// gRPC Access Log Service
 	GRPCAccessLogClusterName = "apip_als_cluster"
+	DefaultALSSocketPath     = "/var/run/api-platform/gateway-analytics.sock"
+	DefaultALSLogName        = "envoy_access_log"
 
 	// MCP related constants
 	MCP_RESOURCE_PATH          = "/mcp"
@@ -105,20 +110,20 @@ const (
 
 	// LLM Transformer constants
 	UPSTREAM_AUTH_APIKEY_POLICY_NAME    = "modify-headers"
-	UPSTREAM_AUTH_APIKEY_POLICY_VERSION = "v0.1.0"
+	UPSTREAM_AUTH_APIKEY_POLICY_VERSION = "v0"
 	UPSTREAM_AUTH_APIKEY_POLICY_PARAMS  = "requestHeaders:\n" +
 		"  - action: SET\n" +
 		"    name: '%s'\n" +
 		"    value: '%s'\n"
 	PROXY_HOST__HEADER_POLICY_NAME    = "modify-headers"
-	PROXY_HOST__HEADER_POLICY_VERSION = "v0.1.0"
+	PROXY_HOST__HEADER_POLICY_VERSION = "v0"
 	PROXY_HOST__HEADER_POLICY_PARAMS  = "requestHeaders:\n" +
 		"  - action: SET\n" +
 		"    name: Host\n" +
 		"    value: '%s'\n"
 
 	ACCESS_CONTROL_DENY_POLICY_NAME    = "respond"
-	ACCESS_CONTROL_DENY_POLICY_VERSION = "v0.1.0"
+	ACCESS_CONTROL_DENY_POLICY_VERSION = "v0"
 	// YAML for default 404 respond policy params
 	ACCESS_CONTROL_DENY_POLICY_PARAMS = "statusCode: 404\n" +
 		"body: \"{\\\"message\\\": \\\"Resource not found.\\\"}\"\n" +
@@ -127,25 +132,31 @@ const (
 		"    value: application/json\n"
 
 	MODIFY_HEADERS_POLICY_NAME    = "modify-headers"
-	MODIFY_HEADERS_POLICY_VERSION = "v0.1.0"
+	MODIFY_HEADERS_POLICY_VERSION = "v0"
 	MODIFY_HEADERS_POLICY_PARAMS  = "requestHeaders:\n" +
 		"  - action: SET\n" +
 		"    name: '%s'\n" +
 		"    value: '%s'\n"
 
 	// API Key constants
-	APIKeyPrefix    = "apip_"
-	APIKeyLen       = 32 // Length of the random part of the API key in bytes
-	APIKeySeparator = "_"
+	APIKeyPrefix = "apip_"
+	APIKeyLen    = 32 // Length of the random part of the API key in bytes
+
+	// API Key length constants
+	DefaultMinAPIKeyLength = 36
+	DefaultMaxAPIKeyLength = 128
+
+	// API Key name and display name length constants
+	APIKeyNameMinLength  = 3
+	APIKeyNameMaxLength  = 63
+	DisplayNameMaxLength = 100
 
 	// HashingAlgorithm constants
-	HashingAlgorithmSHA256   = "sha256"
-	HashingAlgorithmBcrypt   = "bcrypt"
-	HashingAlgorithmArgon2ID = "argon2id"
+	HashingAlgorithmSHA256 = "sha256"
 
 	// System policy constants
 	ANALYTICS_SYSTEM_POLICY_NAME    = "wso2_apip_sys_analytics"
-	ANALYTICS_SYSTEM_POLICY_VERSION = "v0.1.0"
+	ANALYTICS_SYSTEM_POLICY_VERSION = "v0"
 )
 
 var WILDCARD_HTTP_METHODS = []string{

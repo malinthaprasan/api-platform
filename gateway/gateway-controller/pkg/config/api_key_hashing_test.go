@@ -44,18 +44,6 @@ func TestValidateAPIKeyConfig(t *testing.T) {
 			expectError:          false,
 		},
 		{
-			name:                 "valid bcrypt algorithm",
-			apiKeysPerUserPerAPI: 15,
-			algorithm:            constants.HashingAlgorithmBcrypt,
-			expectError:          false,
-		},
-		{
-			name:                 "valid Argon2id algorithm",
-			apiKeysPerUserPerAPI: 20,
-			algorithm:            constants.HashingAlgorithmArgon2ID,
-			expectError:          false,
-		},
-		{
 			name:                 "invalid algorithm",
 			apiKeysPerUserPerAPI: 10,
 			algorithm:            "invalid-algorithm",
@@ -85,11 +73,9 @@ func TestValidateAPIKeyConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a minimal config with API key hashing settings
 			config := &Config{
-				GatewayController: GatewayController{
-					APIKey: APIKeyConfig{
-						APIKeysPerUserPerAPI: tt.apiKeysPerUserPerAPI,
-						Algorithm:            tt.algorithm,
-					},
+				APIKey: APIKeyConfig{
+					APIKeysPerUserPerAPI: tt.apiKeysPerUserPerAPI,
+					Algorithm:            tt.algorithm,
 				},
 			}
 

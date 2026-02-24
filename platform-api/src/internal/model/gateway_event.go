@@ -25,13 +25,14 @@ import (
 // Events are sent over the WebSocket connection to notify gateways of
 // platform-side changes that require gateway action (e.g., API deployment).
 type GatewayEvent struct {
-	// Type identifies the event category (e.g., "api.deployed", "api.undeployed")
+	// Type identifies the event category (e.g., "api.deployed", "api.undeployed", "api.deleted")
 	Type string `json:"type"`
 
 	// Payload contains event-specific data as raw JSON.
 	// The structure depends on the event type:
-	//   - "api.deployed": APIDeploymentEvent
+	//   - "api.deployed": DeploymentEvent
 	//   - "api.undeployed": APIUndeploymentEvent
+	//   - "api.deleted": APIDeletionEvent
 	//   - "gateway.config.updated": GatewayConfigEvent
 	Payload json.RawMessage `json:"payload"`
 
@@ -45,20 +46,17 @@ type GatewayEvent struct {
 	CorrelationID string `json:"correlationId"`
 }
 
-// APIDeploymentEvent contains payload data for "api.deployed" event type.
+// DeploymentEvent contains payload data for "api.deployed" event type.
 // This event is sent when an API is successfully deployed to a gateway.
-type APIDeploymentEvent struct {
+type DeploymentEvent struct {
 	// ApiId identifies the deployed API
 	ApiId string `json:"apiId"`
 
-	// DeploymentID identifies the specific deployment artifact
+	// DeploymentID identifies the specific API deployment
 	DeploymentID string `json:"deploymentId"`
 
 	// Vhost specifies the virtual host where the API is deployed
 	Vhost string `json:"vhost"`
-
-	// Environment specifies the deployment environment (e.g., "production", "sandbox")
-	Environment string `json:"environment"`
 }
 
 // APIUndeploymentEvent contains payload data for "api.undeployed" event type.
@@ -68,6 +66,71 @@ type APIUndeploymentEvent struct {
 	ApiId string `json:"apiId"`
 
 	// Vhost specifies the virtual host from which the API is undeployed
+	Vhost string `json:"vhost"`
+}
+
+// APIDeletionEvent contains payload data for "api.deleted" event type.
+// This event is sent when an API is permanently deleted from the platform.
+type APIDeletionEvent struct {
+	// ApiId identifies the deleted API
+	ApiId string `json:"apiId"`
+
+	// Vhost specifies the virtual host from which the API should be removed
+	Vhost string `json:"vhost"`
+}
+
+// LLMProviderDeploymentEvent contains payload data for "llmprovider.deployed" event type.
+// This event is sent when an LLM provider is successfully deployed to a gateway.
+type LLMProviderDeploymentEvent struct {
+	// ProviderId identifies the deployed LLM provider (handle)
+	ProviderId string `json:"providerId"`
+
+	// DeploymentID identifies the specific deployment artifact
+	DeploymentID string `json:"deploymentId"`
+
+	// Vhost specifies the virtual host where the provider is deployed
+	Vhost string `json:"vhost"`
+
+	// Environment specifies the deployment environment
+	Environment string `json:"environment"`
+}
+
+// LLMProviderUndeploymentEvent contains payload data for "llmprovider.undeployed" event type.
+// This event is sent when an LLM provider is undeployed from a gateway.
+type LLMProviderUndeploymentEvent struct {
+	// ProviderId identifies the undeployed LLM provider (handle)
+	ProviderId string `json:"providerId"`
+
+	// Vhost specifies the virtual host from which the provider is undeployed
+	Vhost string `json:"vhost"`
+
+	// Environment specifies the deployment environment
+	Environment string `json:"environment"`
+}
+
+// LLMProxyDeploymentEvent contains payload data for "llmproxy.deployed" event type.
+// This event is sent when an LLM proxy is successfully deployed to a gateway.
+type LLMProxyDeploymentEvent struct {
+	// ProxyId identifies the deployed LLM proxy (handle)
+	ProxyId string `json:"proxyId"`
+
+	// DeploymentID identifies the specific deployment artifact
+	DeploymentID string `json:"deploymentId"`
+
+	// Vhost specifies the virtual host where the proxy is deployed
+	Vhost string `json:"vhost"`
+
+	// Environment specifies the deployment environment
+	Environment string `json:"environment"`
+}
+
+// LLMProxyUndeploymentEvent contains payload data for "llmproxy.undeployed" event type.
+// This event is sent when an LLM proxy is undeployed from a gateway.
+type LLMProxyUndeploymentEvent struct {
+	// ProxyId identifies the undeployed LLM proxy (handle)
+	ProxyId string `json:"proxyId"`
+
+	// Vhost specifies the virtual host from which the proxy is undeployed
 	Vhost string `json:"vhost"`
 
 	// Environment specifies the deployment environment

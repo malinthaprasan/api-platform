@@ -45,7 +45,7 @@ Feature: Rate Limiting
             path: /limited
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: request-limit
@@ -87,7 +87,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: burst
@@ -139,7 +139,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: request-limit
@@ -189,7 +189,7 @@ Feature: Rate Limiting
             path: /check
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: request-limit
@@ -226,7 +226,7 @@ Feature: Rate Limiting
             path: /custom
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: request-limit
@@ -268,7 +268,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: request-limit
@@ -309,7 +309,7 @@ Feature: Rate Limiting
             path: /anything
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: token-quota
@@ -353,6 +353,62 @@ Feature: Rate Limiting
     Then the response status code should be 429
     And the response body should contain "Rate limit exceeded"
 
+  Scenario: Response cost overage clamps quota to zero
+    Given I authenticate using basic auth as "admin"
+    When I deploy this API configuration:
+      """
+      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      kind: RestApi
+      metadata:
+        name: ratelimit-response-clamp-api
+      spec:
+        displayName: RateLimit Response Clamp API
+        version: v1.0
+        context: /ratelimit-response-clamp/$version
+        upstream:
+          main:
+            url: http://echo-backend:80
+        operations:
+          - method: GET
+            path: /anything
+          - method: POST
+            path: /anything
+            policies:
+              - name: advanced-ratelimit
+                version: v0
+                params:
+                  quotas:
+                    - name: response-token-quota
+                      limits:
+                        - limit: 20
+                          duration: "1h"
+                      costExtraction:
+                        enabled: true
+                        sources:
+                          - type: response_body
+                            jsonPath: "$.json.custom_cost"
+                        default: 0
+      """
+    Then the response should be successful
+    And I wait for the endpoint "http://localhost:8080/ratelimit-response-clamp/v1.0/anything" to be ready
+
+    # custom_cost=50 exceeds remaining=20 on first request.
+    # Expected clamp behavior: consume remaining quota, return 200, remaining becomes 0.
+    When I send a POST request to "http://localhost:8080/ratelimit-response-clamp/v1.0/anything" with body:
+      """
+      {"custom_cost": 50}
+      """
+    Then the response status code should be 200
+    And the response header "X-RateLimit-Remaining" should be "0"
+
+    # Next request must be blocked because previous overage clamped quota to zero.
+    When I send a POST request to "http://localhost:8080/ratelimit-response-clamp/v1.0/anything" with body:
+      """
+      {"custom_cost": 1}
+      """
+    Then the response status code should be 429
+    And the response body should contain "Rate limit exceeded"
+
   Scenario: API-level rate limiting with apiname key extraction
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
@@ -375,7 +431,7 @@ Feature: Rate Limiting
             path: /route1
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: api-quota
@@ -388,7 +444,7 @@ Feature: Rate Limiting
             path: /route2
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: api-quota
@@ -446,7 +502,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: request-limit
@@ -486,7 +542,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: request-limit
@@ -526,7 +582,7 @@ Feature: Rate Limiting
             path: /multi1
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: per-route
@@ -545,7 +601,7 @@ Feature: Rate Limiting
             path: /multi2
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: per-route
@@ -608,7 +664,7 @@ Feature: Rate Limiting
             path: /anything
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: token-limit
@@ -671,7 +727,7 @@ Feature: Rate Limiting
             path: /user
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: per-user-limit
@@ -723,7 +779,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: "request-quota"
@@ -773,7 +829,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: "request-quota"
@@ -820,7 +876,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: token-quota
@@ -886,7 +942,7 @@ Feature: Rate Limiting
             path: /anything
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: "prompt-tokens"
@@ -997,7 +1053,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: per-ip-limit
@@ -1048,7 +1104,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: token-quota
@@ -1111,7 +1167,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: per-user-per-api
@@ -1164,7 +1220,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: token-quota
@@ -1235,7 +1291,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: api-quota
@@ -1269,7 +1325,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: api-quota
@@ -1327,7 +1383,7 @@ Feature: Rate Limiting
             path: /group-a-1
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - limits:
@@ -1341,7 +1397,7 @@ Feature: Rate Limiting
             path: /group-a-2
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - limits:
@@ -1355,7 +1411,7 @@ Feature: Rate Limiting
             path: /group-b-1
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - limits:
@@ -1415,7 +1471,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: per-user-cel
@@ -1465,7 +1521,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: per-user-per-api-cel
@@ -1513,7 +1569,7 @@ Feature: Rate Limiting
             path: /resource
             policies:
               - name: advanced-ratelimit
-                version: v0.1.2
+                version: v0
                 params:
                   quotas:
                     - name: token-quota-cel
@@ -1555,3 +1611,142 @@ Feature: Rate Limiting
       """
     Then the response status code should be 429
     And the response body should contain "Rate limit exceeded"
+
+  # Scenario: API-scoped quota limiter is not deleted when one route is reconfigured
+  #   Given I authenticate using basic auth as "admin"
+  #   # Deploy initial API with two routes sharing an API-scoped quota
+  #   When I deploy this API configuration:
+  #     """
+  #     apiVersion: gateway.api-platform.wso2.com/v1alpha1
+  #     kind: RestApi
+  #     metadata:
+  #       name: ratelimit-shared-quota-api
+  #     spec:
+  #       displayName: RateLimit Shared Quota Test API
+  #       version: v1.0
+  #       context: /ratelimit-shared-quota/$version
+  #       upstream:
+  #         main:
+  #           url: http://sample-backend:9080/api/v1
+  #       operations:
+  #         - method: GET
+  #           path: /health
+  #         - method: GET
+  #           path: /route1
+  #           policies:
+  #             - name: advanced-ratelimit
+  #               version: v0.1.3
+  #               params:
+  #                 quotas:
+  #                   - name: shared-api-quota
+  #                     limits:
+  #                       - limit: 10
+  #                         duration: "1h"
+  #                     keyExtraction:
+  #                       - type: apiname
+  #         - method: GET
+  #           path: /route2
+  #           policies:
+  #             - name: advanced-ratelimit
+  #               version: v0.1.3
+  #               params:
+  #                 quotas:
+  #                   - name: shared-api-quota
+  #                     limits:
+  #                       - limit: 10
+  #                         duration: "1h"
+  #                     keyExtraction:
+  #                       - type: apiname
+  #     """
+  #   Then the response should be successful
+  #   And I wait for the endpoint "http://localhost:8080/ratelimit-shared-quota/v1.0/health" to be ready
+
+  #   # Consume 2 requests from route1 (shared quota: 2/10 used, 8 remaining)
+  #   When I send 2 GET requests to "http://localhost:8080/ratelimit-shared-quota/v1.0/route1"
+  #   Then the response status code should be 200
+
+  #   # Consume 2 requests from route2 (shared quota: 4/10 used, 6 remaining)
+  #   When I send 2 GET requests to "http://localhost:8080/ratelimit-shared-quota/v1.0/route2"
+  #   Then the response status code should be 200
+
+  #   # Consume 1 more request from route1 (shared quota: 5/10 used, 5 remaining)
+  #   When I send a GET request to "http://localhost:8080/ratelimit-shared-quota/v1.0/route1"
+  #   Then the response status code should be 200
+  #   And the response header "X-RateLimit-Remaining" should be "5"
+
+  #   # Update the API: route1 now uses a route-scoped quota instead of the shared API-scoped quota
+  #   # This triggers cleanup of route1's reference to the shared quota
+  #   # BUG (before fix): The shared limiter would be deleted, breaking route2
+  #   # FIX (after fix): Ref count goes from 2->1, limiter preserved for route2
+  #   When I update the API "ratelimit-shared-quota-api" with this configuration:
+  #     """
+  #     apiVersion: gateway.api-platform.wso2.com/v1alpha1
+  #     kind: RestApi
+  #     metadata:
+  #       name: ratelimit-shared-quota-api
+  #     spec:
+  #       displayName: RateLimit Shared Quota Test API
+  #       version: v1.0
+  #       context: /ratelimit-shared-quota/$version
+  #       upstream:
+  #         main:
+  #           url: http://sample-backend:9080/api/v1
+  #       operations:
+  #         - method: GET
+  #           path: /health
+  #         - method: GET
+  #           path: /route1
+  #           policies:
+  #             - name: advanced-ratelimit
+  #               version: v0.1.3
+  #               params:
+  #                 quotas:
+  #                   - name: route-specific-quota
+  #                     limits:
+  #                       - limit: 5
+  #                         duration: "1h"
+  #                     keyExtraction:
+  #                       - type: routename
+  #         - method: GET
+  #           path: /route2
+  #           policies:
+  #             - name: advanced-ratelimit
+  #               version: v0.1.3
+  #               params:
+  #                 quotas:
+  #                   - name: shared-api-quota
+  #                     limits:
+  #                       - limit: 10
+  #                         duration: "1h"
+  #                     keyExtraction:
+  #                       - type: apiname
+  #     """
+  #   Then the response should be successful
+  #   And I wait for 2 seconds
+
+  #   # CRITICAL TEST: route2 should still have 5 remaining requests
+  #   # If the bug exists, the shared limiter would have been deleted and
+  #   # route2 would have a fresh limiter with 10 remaining (state lost)
+  #   When I send a GET request to "http://localhost:8080/ratelimit-shared-quota/v1.0/route2"
+  #   Then the response status code should be 200
+  #   And the response header "X-RateLimit-Remaining" should be "4"
+
+  #   # Continue consuming from route2 to exhaust the shared quota
+  #   # 5 remaining - 4 = 1 left
+  #   When I send 3 GET requests to "http://localhost:8080/ratelimit-shared-quota/v1.0/route2"
+  #   Then the response status code should be 200
+
+  #   # 1 remaining - 1 = 0 left (exhausted)
+  #   When I send a GET request to "http://localhost:8080/ratelimit-shared-quota/v1.0/route2"
+  #   Then the response status code should be 200
+  #   And the response header "X-RateLimit-Remaining" should be "0"
+
+  #   # This request should be rate limited - quota exhausted
+  #   When I send a GET request to "http://localhost:8080/ratelimit-shared-quota/v1.0/route2"
+  #   Then the response status code should be 429
+  #   And the response body should contain "Rate limit exceeded"
+
+  #   # route1 should have its own separate quota (5 remaining)
+  #   When I send a GET request to "http://localhost:8080/ratelimit-shared-quota/v1.0/route1"
+  #   Then the response status code should be 200
+  #   And the response header "X-RateLimit-Remaining" should be "4"

@@ -238,7 +238,7 @@ func (cs *ConfigStore) Get(id string) (*models.StoredConfig, error) {
 
 	cfg, exists := cs.configs[id]
 	if !exists {
-		return nil, fmt.Errorf("configuration with ID '%s' not found", id)
+		return nil, fmt.Errorf("%w: id=%s", ErrNotFound, id)
 	}
 	return cfg, nil
 }
@@ -251,12 +251,12 @@ func (cs *ConfigStore) GetByNameVersion(name, version string) (*models.StoredCon
 	key := fmt.Sprintf("%s:%s", name, version)
 	configID, exists := cs.nameVersion[key]
 	if !exists {
-		return nil, fmt.Errorf("configuration with name '%s' and version '%s' not found", name, version)
+		return nil, fmt.Errorf("%w: name=%s, version=%s", ErrNotFound, name, version)
 	}
 
 	cfg, exists := cs.configs[configID]
 	if !exists {
-		return nil, fmt.Errorf("configuration with name '%s' and version '%s' not found", name, version)
+		return nil, fmt.Errorf("%w: name=%s, version=%s", ErrNotFound, name, version)
 	}
 	return cfg, nil
 }
@@ -269,16 +269,16 @@ func (cs *ConfigStore) GetByHandle(handle string) (*models.StoredConfig, error) 
 	key := fmt.Sprintf("%s", handle)
 	configID, exists := cs.handle[key]
 	if !exists {
-		return nil, fmt.Errorf("configuration with handle '%s' not found", handle)
+		return nil, fmt.Errorf("%w: handle=%s", ErrNotFound, handle)
 	}
 
 	cfg, exists := cs.configs[configID]
 	if !exists {
-		return nil, fmt.Errorf("configuration with handle '%s' not found", handle)
+		return nil, fmt.Errorf("%w: handle=%s", ErrNotFound, handle)
 	}
 
 	if cfg.GetHandle() != handle {
-		return nil, fmt.Errorf("configuration with handle '%s' not found", handle)
+		return nil, fmt.Errorf("%w: handle=%s", ErrNotFound, handle)
 	}
 	return cfg, nil
 }
@@ -622,14 +622,18 @@ func (cs *ConfigStore) RemoveAPIKeyByID(apiId, id string) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	_, exists := cs.apiKeysByAPI[apiId][id]
+	apiKeys, exists := cs.apiKeysByAPI[apiId]
+	if !exists {
+		return ErrNotFound
+	}
+	_, exists = apiKeys[id]
 	if !exists {
 		return ErrNotFound
 	}
 
 	// Remove from apiKeysByAPI map
-	apiKeys, _ := cs.apiKeysByAPI[apiId]
 	delete(apiKeys, id)
+
 	// Clean up empty maps
 	if len(cs.apiKeysByAPI[apiId]) == 0 {
 		delete(cs.apiKeysByAPI, apiId)
@@ -650,7 +654,6 @@ func (cs *ConfigStore) RemoveAPIKeysByAPI(apiId string) error {
 
 	// Remove from API-specific map
 	delete(cs.apiKeysByAPI, apiId)
-
 	return nil
 }
 

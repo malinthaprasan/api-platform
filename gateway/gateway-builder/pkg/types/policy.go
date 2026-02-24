@@ -34,6 +34,9 @@ type DiscoveredPolicy struct {
 	SourceFiles      []string
 	SystemParameters map[string]interface{}
 	Definition       *policy.PolicyDefinition
+	GoModulePath     string // The actual Go module path (from go.mod or gomodule field)
+	GoModuleVersion  string // Resolved version for gomodule entries (e.g., "v0.1.0")
+	IsFilePathEntry  bool   // True if from filePath manifest entry (needs replace directive)
 }
 
 // ConditionDef represents execution conditions
@@ -88,13 +91,14 @@ type PolicyInfo struct {
 
 // CompilationOptions contains settings for the compilation phase
 type CompilationOptions struct {
-	OutputPath string
-	EnableUPX  bool
-	LDFlags    string
-	BuildTags  []string
-	CGOEnabled bool
-	TargetOS   string
-	TargetArch string
+	OutputPath     string
+	LDFlags        string
+	BuildTags      []string
+	CGOEnabled     bool
+	TargetOS       string
+	TargetArch     string
+	EnableCoverage bool // Enable coverage instrumentation for integration tests
+	EnableDebug    bool // Disable optimizations/inlining for dlv remote debugging
 }
 
 // PackagingMetadata contains Docker image metadata

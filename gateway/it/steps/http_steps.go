@@ -72,10 +72,14 @@ func (h *HTTPSteps) Register(ctx *godog.ScenarioContext) {
 	ctx.Step(`^I send a GET request to \"([^\"]*)\" with header \"([^\"]*)\" value \"([^\"]*)\"$`, h.iSendGETRequestWithHeader)
 	ctx.Step(`^I send (\d+) GET requests to \"([^\"]*)\" with header \"([^\"]*)\" value \"([^\"]*)\"$`, h.iSendManyGETRequestsWithHeader)
 	ctx.Step(`^I send a POST request to \"([^\"]*)\" with header \"([^\"]*)\" value \"([^\"]*)\" with body:$`, h.iSendPOSTRequestWithHeaderAndBody)
+	ctx.Step(`^I send a GET request to \"([^\"]*)\" with header \"([^\"]*)\"$`, h.iSendGETRequestWithHeaderPair)
+	ctx.Step(`^I send a POST request to \"([^\"]*)\" with header \"([^\"]*)\" and body:$`, h.iSendPOSTRequestWithHeaderPairAndBody)
 
 	// Service-specific shortcuts
 	ctx.Step(`^I send a GET request to the "([^"]*)" service at "([^"]*)"$`, h.iSendGETToService)
 	ctx.Step(`^I send a POST request to the "([^"]*)" service at "([^"]*)" with body:$`, h.iSendPOSTToServiceWithBody)
+	ctx.Step(`^I send a DELETE request to the "([^"]*)" service at "([^"]*)"$`, h.iSendDELETEToService)
+	ctx.Step(`^I send a PUT request to the "([^"]*)" service at "([^"]*)" with body:$`, h.iSendPUTToServiceWithBody)
 
 	// Utility steps
 	ctx.Step(`^I wait for (\d+) seconds$`, h.iWaitForSeconds)
@@ -229,6 +233,26 @@ func (h *HTTPSteps) iSendPOSTToServiceWithBody(serviceName, path string, body *g
 	return h.sendRequest(http.MethodPost, url, []byte(body.Content))
 }
 
+// iSendDELETEToService sends a DELETE request to a named service
+func (h *HTTPSteps) iSendDELETEToService(serviceName, path string) error {
+	baseURL, ok := h.baseURLs[serviceName]
+	if !ok {
+		return fmt.Errorf("unknown service: %s", serviceName)
+	}
+	url := baseURL + path
+	return h.sendRequest(http.MethodDelete, url, nil)
+}
+
+// iSendPUTToServiceWithBody sends a PUT request to a named service with body
+func (h *HTTPSteps) iSendPUTToServiceWithBody(serviceName, path string, body *godog.DocString) error {
+	baseURL, ok := h.baseURLs[serviceName]
+	if !ok {
+		return fmt.Errorf("unknown service: %s", serviceName)
+	}
+	url := baseURL + path
+	return h.sendRequest(http.MethodPut, url, []byte(body.Content))
+}
+
 // iWaitForSeconds waits for the specified number of seconds
 func (h *HTTPSteps) iWaitForSeconds(seconds int) error {
 	time.Sleep(time.Duration(seconds) * time.Second)
@@ -299,6 +323,12 @@ func (h *HTTPSteps) sendRequestWithTempHeader(method, url string, body []byte, h
 	}
 
 	log.Printf("DEBUG: Received response from %s: status=%d", url, resp.StatusCode)
+	// Log response headers
+	for name, values := range resp.Header {
+		for _, value := range values {
+			log.Printf("DEBUG: Response header %s: %s", name, value)
+		}
+	}
 
 	h.lastResponse = resp
 
@@ -308,6 +338,13 @@ func (h *HTTPSteps) sendRequestWithTempHeader(method, url string, body []byte, h
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
+
+	// Log response body for debugging (truncate if too large)
+	bodyStr := string(h.lastBody)
+	if len(bodyStr) > 500 {
+		bodyStr = bodyStr[:500] + "..."
+	}
+	log.Printf("DEBUG: Response body: %s", bodyStr)
 
 	return nil
 }
@@ -352,6 +389,12 @@ func (h *HTTPSteps) sendRequest(method, url string, body []byte) error {
 	}
 
 	log.Printf("DEBUG: Received response from %s: status=%d", url, resp.StatusCode)
+	// Log response headers
+	for name, values := range resp.Header {
+		for _, value := range values {
+			log.Printf("DEBUG: Response header %s: %s", name, value)
+		}
+	}
 
 	h.lastResponse = resp
 
@@ -361,6 +404,13 @@ func (h *HTTPSteps) sendRequest(method, url string, body []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
+
+	// Log response body for debugging (truncate if too large)
+	bodyStr := string(h.lastBody)
+	if len(bodyStr) > 500 {
+		bodyStr = bodyStr[:500] + "..."
+	}
+	log.Printf("DEBUG: Response body: %s", bodyStr)
 
 	return nil
 }
@@ -442,4 +492,30 @@ func (h *HTTPSteps) SendMcpRequest(url string, body *godog.DocString) error {
 func isEventStream(resp *http.Response) bool {
 	contentType := resp.Header.Get("Content-Type")
 	return bytes.Contains([]byte(contentType), []byte("text/event-stream"))
+}
+
+// iSendGETRequestWithHeaderPair sends a GET request with a header in "Name: Value" format
+func (h *HTTPSteps) iSendGETRequestWithHeaderPair(url, headerPair string) error {
+	// Parse "Name: Value" format
+	parts := strings.SplitN(headerPair, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid header format, expected 'Name: Value', got: %s", headerPair)
+	}
+	headerName := strings.TrimSpace(parts[0])
+	headerValue := strings.TrimSpace(parts[1])
+
+	return h.sendRequestWithTempHeader(http.MethodGet, url, nil, headerName, headerValue)
+}
+
+// iSendPOSTRequestWithHeaderPairAndBody sends a POST request with a header in "Name: Value" format and body
+func (h *HTTPSteps) iSendPOSTRequestWithHeaderPairAndBody(url, headerPair string, body *godog.DocString) error {
+	// Parse "Name: Value" format
+	parts := strings.SplitN(headerPair, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid header format, expected 'Name: Value', got: %s", headerPair)
+	}
+	headerName := strings.TrimSpace(parts[0])
+	headerValue := strings.TrimSpace(parts[1])
+
+	return h.sendRequestWithTempHeader(http.MethodPost, url, []byte(body.Content), headerName, headerValue)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/adminserver"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/apikeyxds"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/lazyresourcexds"
 
@@ -25,13 +27,11 @@ import (
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/controlplane"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/logger"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/metrics"
-	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/models"
+	policybuilder "github.com/wso2/api-platform/gateway/gateway-controller/pkg/policy"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/policyxds"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/storage"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/utils"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/xds"
-	policy "github.com/wso2/api-platform/sdk/gateway/policy/v1alpha"
-	policyenginev1 "github.com/wso2/api-platform/sdk/gateway/policyengine/v1"
 )
 
 // Version information (set via ldflags during build)
@@ -40,6 +40,30 @@ var (
 	GitCommit = "unknown"
 	BuildDate = "unknown"
 )
+
+func toBackendConfig(cfg *config.Config) storage.BackendConfig {
+	pg := cfg.Controller.Storage.Postgres
+	return storage.BackendConfig{
+		Type:       cfg.Controller.Storage.Type,
+		SQLitePath: cfg.Controller.Storage.SQLite.Path,
+		Postgres: storage.PostgresConnectionConfig{
+			DSN:             pg.DSN,
+			Host:            pg.Host,
+			Port:            pg.Port,
+			Database:        pg.Database,
+			User:            pg.User,
+			Password:        pg.Password,
+			SSLMode:         pg.SSLMode,
+			ConnectTimeout:  pg.ConnectTimeout,
+			MaxOpenConns:    pg.MaxOpenConns,
+			MaxIdleConns:    pg.MaxIdleConns,
+			ConnMaxLifetime: pg.ConnMaxLifetime,
+			ConnMaxIdleTime: pg.ConnMaxIdleTime,
+			ApplicationName: pg.ApplicationName,
+		},
+		GatewayID: cfg.Controller.Server.GatewayID,
+	}
+}
 
 func main() {
 	// Parse command-line flags
@@ -62,13 +86,13 @@ func main() {
 
 	// Initialize metrics based on configuration
 	// This must be done before any metrics are used to ensure no-op behavior when disabled
-	metrics.SetEnabled(cfg.GatewayController.Metrics.Enabled)
+	metrics.SetEnabled(cfg.Controller.Metrics.Enabled)
 	metrics.Init() // Initialize metrics immediately so they're available throughout the codebase
 
 	// Initialize logger with config
 	log := logger.NewLogger(logger.Config{
-		Level:  cfg.GatewayController.Logging.Level,
-		Format: cfg.GatewayController.Logging.Format,
+		Level:  cfg.Controller.Logging.Level,
+		Format: cfg.Controller.Logging.Format,
 	})
 
 	log.Info("Starting Gateway-Controller",
@@ -76,42 +100,33 @@ func main() {
 		slog.String("git_commit", GitCommit),
 		slog.String("build_date", BuildDate),
 		slog.String("config_file", *configPath),
-		slog.String("storage_type", cfg.GatewayController.Storage.Type),
-		slog.Bool("access_logs_enabled", cfg.GatewayController.Router.AccessLogs.Enabled),
-		slog.String("control_plane_host", cfg.GatewayController.ControlPlane.Host),
-		slog.Bool("control_plane_token_configured", cfg.GatewayController.ControlPlane.Token != ""),
+		slog.String("storage_type", cfg.Controller.Storage.Type),
+		slog.Bool("access_logs_enabled", cfg.Router.AccessLogs.Enabled),
+		slog.String("control_plane_host", cfg.Controller.ControlPlane.Host),
+		slog.Bool("control_plane_token_configured", cfg.Controller.ControlPlane.Token != ""),
 	)
 
-	if !cfg.GatewayController.Auth.Basic.Enabled && !cfg.GatewayController.Auth.IDP.Enabled {
+	if !cfg.Controller.Auth.Basic.Enabled && !cfg.Controller.Auth.IDP.Enabled {
 		log.Warn("No authentication configured: both basic auth and IDP are disabled. Gateway Controller API will allow all requests without authentication")
 	}
 
 	// Initialize storage based on type
 	var db storage.Storage
 	if cfg.IsPersistentMode() {
-		switch cfg.GatewayController.Storage.Type {
-		case "sqlite":
-			log.Info("Initializing SQLite storage", slog.String("path", cfg.GatewayController.Storage.SQLite.Path))
-			db, err = storage.NewSQLiteStorage(cfg.GatewayController.Storage.SQLite.Path, log)
-			if err != nil {
-				// Check for database locked error and provide clear guidance
-				if err.Error() == "database is locked" || err.Error() == "failed to open database: database is locked" {
-					log.Error("Database is locked by another process",
-						slog.String("database_path", cfg.GatewayController.Storage.SQLite.Path),
-						slog.String("troubleshooting", "Check if another gateway-controller instance is running or remove stale WAL files"))
-					os.Exit(1)
-				}
-				log.Error("Failed to initialize SQLite database", slog.Any("error", err))
+		db, err = storage.NewStorage(toBackendConfig(cfg), log)
+		if err != nil {
+			if strings.EqualFold(cfg.Controller.Storage.Type, "sqlite") && errors.Is(err, storage.ErrDatabaseLocked) {
+				log.Error("Database is locked by another process",
+					slog.String("database_path", cfg.Controller.Storage.SQLite.Path),
+					slog.String("troubleshooting", "Check if another gateway-controller instance is running or remove stale WAL files"))
 				os.Exit(1)
 			}
-			defer db.Close()
-		case "postgres":
-			log.Error("PostgreSQL storage not yet implemented")
-			os.Exit(1)
-		default:
-			log.Error("Unknown storage type", slog.String("type", cfg.GatewayController.Storage.Type))
+			log.Error("Failed to initialize database storage",
+				slog.String("type", cfg.Controller.Storage.Type),
+				slog.Any("error", err))
 			os.Exit(1)
 		}
+		defer db.Close()
 	} else {
 		log.Info("Running in memory-only mode (no persistent storage)")
 	}
@@ -152,7 +167,7 @@ func main() {
 	}
 
 	// Initialize xDS snapshot manager with router config
-	snapshotManager := xds.NewSnapshotManager(configStore, log, &cfg.GatewayController.Router, db, cfg)
+	snapshotManager := xds.NewSnapshotManager(configStore, log, &cfg.Router, db, cfg)
 
 	// Initialize SDS secret manager if custom certificates are configured
 	var sdsSecretManager *xds.SDSSecretManager
@@ -183,8 +198,12 @@ func main() {
 	}
 	cancel()
 
+	// Create channels to detect when router and policy engine first connect
+	routerConnected := make(chan struct{})
+	policyEngineConnected := make(chan struct{})
+
 	// Start xDS gRPC server with SDS support
-	xdsServer := xds.NewServer(snapshotManager, sdsSecretManager, cfg.GatewayController.Server.XDSPort, log)
+	xdsServer := xds.NewServer(snapshotManager, sdsSecretManager, cfg.Controller.Server.XDSPort, log, routerConnected)
 	go func() {
 		if err := xdsServer.Start(); err != nil {
 			log.Error("xDS server failed", slog.Any("error", err))
@@ -205,75 +224,9 @@ func main() {
 		cancel()
 	}
 
-	// Initialize policy store and start policy xDS server if enabled
-	var policyXDSServer *policyxds.Server
-	var policyManager *policyxds.PolicyManager
-	if cfg.GatewayController.PolicyServer.Enabled {
-		log.Info("Initializing Policy xDS server", slog.Int("port", cfg.GatewayController.PolicyServer.Port))
-
-		// Initialize policy store
-		policyStore := storage.NewPolicyStore()
-
-		// Initialize policy snapshot manager
-		policySnapshotManager := policyxds.NewSnapshotManager(policyStore, log)
-		// Initialize policy manager (used to derive policies from API configurations)
-		policyManager = policyxds.NewPolicyManager(policyStore, policySnapshotManager, log)
-
-		// Load policies from existing API configurations on startup
-		if cfg.IsPersistentMode() {
-			log.Info("Deriving policies from loaded API configurations")
-			loadedAPIs := configStore.GetAll()
-			derivedCount := 0
-			for _, apiConfig := range loadedAPIs {
-				// Derive policy configuration from API
-				if apiConfig.Configuration.Kind == api.RestApi {
-					storedPolicy := derivePolicyFromAPIConfig(apiConfig, cfg)
-					if storedPolicy != nil {
-						if err := policyStore.Set(storedPolicy); err != nil {
-							log.Warn("Failed to load policy from API",
-								slog.String("api_id", apiConfig.ID),
-								slog.Any("error", err))
-						} else {
-							derivedCount++
-						}
-					}
-				}
-			}
-			log.Info("Loaded policies from API configurations",
-				slog.Int("total_apis", len(loadedAPIs)),
-				slog.Int("policies_derived", derivedCount))
-		}
-
-		// Generate initial policy snapshot
-		log.Info("Generating initial policy xDS snapshot")
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := policySnapshotManager.UpdateSnapshot(ctx); err != nil {
-			log.Warn("Failed to generate initial policy xDS snapshot", slog.Any("error", err))
-		}
-		cancel()
-
-		// Start policy xDS server in a separate goroutine
-		var serverOpts []policyxds.ServerOption
-		if cfg.GatewayController.PolicyServer.TLS.Enabled {
-			serverOpts = append(serverOpts, policyxds.WithTLS(
-				cfg.GatewayController.PolicyServer.TLS.CertFile,
-				cfg.GatewayController.PolicyServer.TLS.KeyFile,
-			))
-		}
-		policyXDSServer = policyxds.NewServer(policySnapshotManager, apiKeySnapshotManager, lazyResourceSnapshotManager, cfg.GatewayController.PolicyServer.Port, log, serverOpts...)
-		go func() {
-			if err := policyXDSServer.Start(); err != nil {
-				log.Error("Policy xDS server failed", slog.Any("error", err))
-				os.Exit(1)
-			}
-		}()
-	} else {
-		log.Info("Policy xDS server is disabled")
-	}
-
-	// Load policy definitions from files (must be done before creating validator)
+	// Load policy definitions from files (must be before policy derivation and validator)
 	policyLoader := utils.NewPolicyLoader(log)
-	policyDir := cfg.GatewayController.Policies.DefinitionsPath
+	policyDir := cfg.Controller.Policies.DefinitionsPath
 	log.Info("Loading policy definitions from directory", slog.String("directory", policyDir))
 	policyDefinitions, err := policyLoader.LoadPoliciesFromDirectory(policyDir)
 	if err != nil {
@@ -282,9 +235,71 @@ func main() {
 	}
 	log.Info("Policy definitions loaded", slog.Int("count", len(policyDefinitions)))
 
+	// Initialize policy store and policy xDS server
+	log.Info("Initializing Policy xDS server", slog.Int("port", cfg.Controller.PolicyServer.Port))
+
+	// Initialize policy store
+	policyStore := storage.NewPolicyStore()
+
+	// Initialize policy snapshot manager
+	policySnapshotManager := policyxds.NewSnapshotManager(policyStore, log)
+	// Initialize policy manager (used to derive policies from API configurations)
+	policyManager := policyxds.NewPolicyManager(policyStore, policySnapshotManager, log)
+
+	// Load policies from existing API configurations on startup
+	if cfg.IsPersistentMode() {
+		log.Info("Deriving policies from loaded API configurations")
+		loadedAPIs := configStore.GetAll()
+		derivedCount := 0
+		for _, apiConfig := range loadedAPIs {
+			// Derive policy configuration from API
+			if apiConfig.Configuration.Kind == api.RestApi {
+				storedPolicy := policybuilder.DerivePolicyFromAPIConfig(apiConfig, &cfg.Router, cfg, policyDefinitions)
+				if storedPolicy != nil {
+					if err := policyStore.Set(storedPolicy); err != nil {
+						log.Warn("Failed to load policy from API",
+							slog.String("api_id", apiConfig.ID),
+							slog.Any("error", err))
+					} else {
+						derivedCount++
+					}
+				}
+			}
+		}
+		log.Info("Loaded policies from API configurations",
+			slog.Int("total_apis", len(loadedAPIs)),
+			slog.Int("policies_derived", derivedCount))
+	}
+
+	// Generate initial policy snapshot
+	log.Info("Generating initial policy xDS snapshot")
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	if err := policySnapshotManager.UpdateSnapshot(ctx); err != nil {
+		log.Warn("Failed to generate initial policy xDS snapshot", slog.Any("error", err))
+	}
+	cancel()
+
+	// Start policy xDS server in a separate goroutine
+	serverOpts := []policyxds.ServerOption{
+		policyxds.WithOnFirstConnect(policyEngineConnected),
+	}
+	if cfg.Controller.PolicyServer.TLS.Enabled {
+		serverOpts = append(serverOpts, policyxds.WithTLS(
+			cfg.Controller.PolicyServer.TLS.CertFile,
+			cfg.Controller.PolicyServer.TLS.KeyFile,
+		))
+	}
+	policyXDSServer := policyxds.NewServer(policySnapshotManager, apiKeySnapshotManager, lazyResourceSnapshotManager, cfg.Controller.PolicyServer.Port, log, serverOpts...)
+	go func() {
+		if err := policyXDSServer.Start(); err != nil {
+			log.Error("Policy xDS server failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+	}()
+
 	// Load llm provider templates from files
 	templateLoader := utils.NewLLMTemplateLoader(log)
-	templateDir := cfg.GatewayController.LLM.TemplateDefinitionsPath
+	templateDir := cfg.Controller.LLM.TemplateDefinitionsPath
 	log.Info("Loading llm provider templates from directory", slog.String("directory", templateDir))
 	templateDefinitions, err := templateLoader.LoadTemplatesFromDirectory(templateDir)
 	if err != nil {
@@ -298,8 +313,8 @@ func main() {
 	policyValidator := config.NewPolicyValidator(policyDefinitions)
 	validator.SetPolicyValidator(policyValidator)
 
-	// Initialize and start control plane client with dependencies for API creation
-	cpClient := controlplane.NewClient(cfg.GatewayController.ControlPlane, log, configStore, db, snapshotManager, validator, &cfg.GatewayController.Router)
+	// Initialize and start control plane client with dependencies for API creation and API key management
+	cpClient := controlplane.NewClient(cfg.Controller.ControlPlane, log, configStore, db, snapshotManager, validator, &cfg.Router, apiKeyXDSManager, &cfg.APIKey, policyManager, cfg, policyDefinitions, lazyResourceXDSManager, templateDefinitions)
 	if err := cpClient.Start(); err != nil {
 		log.Error("Failed to start control plane client", slog.Any("error", err))
 		// Don't fail startup - gateway can run in degraded mode without control plane
@@ -318,7 +333,7 @@ func main() {
 	router.Use(middleware.ErrorHandlingMiddleware(log))
 	router.Use(middleware.LoggingMiddleware(log))
 	// Add metrics middleware if metrics are enabled
-	if cfg.GatewayController.Metrics.Enabled {
+	if cfg.Controller.Metrics.Enabled {
 		router.Use(middleware.MetricsMiddleware())
 	}
 	authConfig := generateAuthConfig(cfg)
@@ -352,16 +367,28 @@ func main() {
 	// Register API routes (includes certificate management endpoints from OpenAPI spec)
 	api.RegisterHandlers(router, apiServer)
 
+	// Start controller admin server for debug endpoints if enabled.
+	var controllerAdminServer *adminserver.Server
+	if cfg.Controller.AdminServer.Enabled {
+		controllerAdminServer = adminserver.NewServer(&cfg.Controller.AdminServer, apiServer, log)
+		go func() {
+			if err := controllerAdminServer.Start(); err != nil {
+				log.Error("Controller admin server failed", slog.Any("error", err))
+				os.Exit(1)
+			}
+		}()
+	}
+
 	// Start metrics server if enabled
 	var metricsServer *metrics.Server
 	var metricsCtxCancel context.CancelFunc
-	if cfg.GatewayController.Metrics.Enabled {
-		log.Info("Starting metrics server", slog.Int("port", cfg.GatewayController.Metrics.Port))
+	if cfg.Controller.Metrics.Enabled {
+		log.Info("Starting metrics server", slog.Int("port", cfg.Controller.Metrics.Port))
 
 		// Set build info metric
-		metrics.Info.WithLabelValues(Version, cfg.GatewayController.Storage.Type, BuildDate).Set(1)
+		metrics.Info.WithLabelValues(Version, cfg.Controller.Storage.Type, BuildDate).Set(1)
 
-		metricsServer = metrics.NewServer(&cfg.GatewayController.Metrics, log)
+		metricsServer = metrics.NewServer(&cfg.Controller.Metrics, log)
 		if err := metricsServer.Start(); err != nil {
 			log.Error("Metrics server failed", slog.Any("error", err))
 			os.Exit(1)
@@ -374,11 +401,11 @@ func main() {
 	}
 
 	// Start REST API server
-	log.Info("Starting REST API server", slog.Int("port", cfg.GatewayController.Server.APIPort))
+	log.Info("Starting REST API server", slog.Int("port", cfg.Controller.Server.APIPort))
 
 	// Setup graceful shutdown
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.GatewayController.Server.APIPort),
+		Addr:    fmt.Sprintf(":%d", cfg.Controller.Server.APIPort),
 		Handler: router,
 	}
 
@@ -392,6 +419,21 @@ func main() {
 
 	log.Info("Gateway Controller started successfully")
 
+	// Print banner when both router and policy engine have connected
+	go func() {
+		<-routerConnected
+		<-policyEngineConnected
+		fmt.Print("\n\n" +
+			"========================================================================\n" +
+			"\n" +
+			"\n" +
+			"                   API Platform Gateway Started\n" +
+			"\n" +
+			"\n" +
+			"========================================================================\n" +
+			"\n\n")
+	}()
+
 	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -400,7 +442,7 @@ func main() {
 	log.Info("Shutting down Gateway-Controller")
 
 	// Graceful shutdown with timeout
-	ctx, cancel = context.WithTimeout(context.Background(), cfg.GatewayController.Server.ShutdownTimeout)
+	ctx, cancel = context.WithTimeout(context.Background(), cfg.Controller.Server.ShutdownTimeout)
 	defer cancel()
 
 	// Stop control plane client first
@@ -425,6 +467,12 @@ func main() {
 		}
 		if err := metricsServer.Stop(ctx); err != nil {
 			log.Error("Failed to stop metrics server", slog.Any("error", err))
+		}
+	}
+
+	if controllerAdminServer != nil {
+		if err := controllerAdminServer.Stop(ctx); err != nil {
+			log.Error("Failed to stop controller admin server", slog.Any("error", err))
 		}
 	}
 
@@ -472,16 +520,15 @@ func generateAuthConfig(config *config.Config) commonmodels.AuthConfig {
 
 		"POST /apis/:id/api-keys":                        {"admin", "consumer"},
 		"GET /apis/:id/api-keys":                         {"admin", "consumer"},
+		"PUT /apis/:id/api-keys/:apiKeyName":             {"admin", "consumer"},
 		"POST /apis/:id/api-keys/:apiKeyName/regenerate": {"admin", "consumer"},
 		"DELETE /apis/:id/api-keys/:apiKeyName":          {"admin", "consumer"},
-
-		"GET /config_dump": {"admin"},
 	}
 	basicAuth := commonmodels.BasicAuth{Enabled: false}
 	idpAuth := commonmodels.IDPConfig{Enabled: false}
-	if config.GatewayController.Auth.Basic.Enabled {
-		users := make([]commonmodels.User, len(config.GatewayController.Auth.Basic.Users))
-		for i, authUser := range config.GatewayController.Auth.Basic.Users {
+	if config.Controller.Auth.Basic.Enabled {
+		users := make([]commonmodels.User, len(config.Controller.Auth.Basic.Users))
+		for i, authUser := range config.Controller.Auth.Basic.Users {
 			users[i] = commonmodels.User{
 				Username:       authUser.Username,
 				Password:       authUser.Password,
@@ -491,11 +538,11 @@ func generateAuthConfig(config *config.Config) commonmodels.AuthConfig {
 		}
 		basicAuth = commonmodels.BasicAuth{Enabled: true, Users: users}
 	}
-	if config.GatewayController.Auth.IDP.Enabled {
-		idpAuth = commonmodels.IDPConfig{Enabled: true, IssuerURL: config.GatewayController.Auth.IDP.Issuer,
-			JWKSUrl:           config.GatewayController.Auth.IDP.JWKSURL,
-			ScopeClaim:        config.GatewayController.Auth.IDP.RolesClaim,
-			PermissionMapping: &config.GatewayController.Auth.IDP.RoleMapping,
+	if config.Controller.Auth.IDP.Enabled {
+		idpAuth = commonmodels.IDPConfig{Enabled: true, IssuerURL: config.Controller.Auth.IDP.Issuer,
+			JWKSUrl:           config.Controller.Auth.IDP.JWKSURL,
+			ScopeClaim:        config.Controller.Auth.IDP.RolesClaim,
+			PermissionMapping: &config.Controller.Auth.IDP.RoleMapping,
 		}
 	}
 	authConfig := commonmodels.AuthConfig{BasicAuth: &basicAuth,
@@ -504,135 +551,4 @@ func generateAuthConfig(config *config.Config) commonmodels.AuthConfig {
 		SkipPaths:     []string{"/health"},
 	}
 	return authConfig
-}
-
-// derivePolicyFromAPIConfig derives a policy configuration from an API configuration
-// This is a simplified version of the buildStoredPolicyFromAPI function from handlers
-func derivePolicyFromAPIConfig(cfg *models.StoredConfig, fullConfig *config.Config) *models.StoredPolicyConfig {
-	apiCfg := &cfg.Configuration
-	routerConfig := &fullConfig.GatewayController.Router
-	apiData, err := apiCfg.Spec.AsAPIConfigData()
-	if err != nil {
-		return nil
-	}
-
-	// Collect API-level policies
-	apiPolicies := make(map[string]policyenginev1.PolicyInstance)
-	if apiData.Policies != nil {
-		for _, p := range *apiData.Policies {
-			apiPolicies[p.Name] = convertAPIPolicyToModel(p, policy.LevelAPI)
-		}
-	}
-
-	// Build routes with merged policies
-	routes := make([]policyenginev1.PolicyChain, 0)
-	for _, op := range apiData.Operations {
-		var finalPolicies []policyenginev1.PolicyInstance
-
-		if op.Policies != nil && len(*op.Policies) > 0 {
-			// Operation has policies
-			finalPolicies = make([]policyenginev1.PolicyInstance, 0, len(*op.Policies))
-			addedNames := make(map[string]struct{})
-
-			for _, opPolicy := range *op.Policies {
-				finalPolicies = append(finalPolicies, convertAPIPolicyToModel(opPolicy, policy.LevelRoute))
-				addedNames[opPolicy.Name] = struct{}{}
-			}
-
-			// Add remaining API-level policies
-			if apiData.Policies != nil {
-				for _, apiPolicy := range *apiData.Policies {
-					if _, exists := addedNames[apiPolicy.Name]; !exists {
-						finalPolicies = append(finalPolicies, apiPolicies[apiPolicy.Name])
-					}
-				}
-			}
-		} else {
-			// No operation policies: use API-level policies
-			if apiData.Policies != nil {
-				finalPolicies = make([]policyenginev1.PolicyInstance, 0, len(*apiData.Policies))
-				for _, p := range *apiData.Policies {
-					finalPolicies = append(finalPolicies, apiPolicies[p.Name])
-				}
-			}
-		}
-
-		// Determine effective vhosts (fallback to global router defaults when not provided)
-		effectiveMainVHost := routerConfig.VHosts.Main.Default
-		effectiveSandboxVHost := routerConfig.VHosts.Sandbox.Default
-		if apiData.Vhosts != nil {
-			if strings.TrimSpace(apiData.Vhosts.Main) != "" {
-				effectiveMainVHost = apiData.Vhosts.Main
-			}
-			if apiData.Vhosts.Sandbox != nil && strings.TrimSpace(*apiData.Vhosts.Sandbox) != "" {
-				effectiveSandboxVHost = *apiData.Vhosts.Sandbox
-			}
-		}
-
-		vhosts := []string{effectiveMainVHost}
-		if apiData.Upstream.Sandbox != nil && apiData.Upstream.Sandbox.Url != nil &&
-			strings.TrimSpace(*apiData.Upstream.Sandbox.Url) != "" {
-			vhosts = append(vhosts, effectiveSandboxVHost)
-		}
-
-		for _, vhost := range vhosts {
-			// Inject system policies into the chain
-			props := make(map[string]any)
-			injectedPolicies := utils.InjectSystemPolicies(finalPolicies, fullConfig, props)
-
-			routes = append(routes, policyenginev1.PolicyChain{
-				RouteKey: xds.GenerateRouteName(string(op.Method), apiData.Context, apiData.Version, op.Path, vhost),
-				Policies: injectedPolicies,
-			})
-		}
-	}
-
-	// If there are no policies at all (including system policies), return nil
-	policyCount := 0
-	for _, r := range routes {
-		policyCount += len(r.Policies)
-	}
-	if policyCount == 0 {
-		return nil
-	}
-
-	now := time.Now().Unix()
-	return &models.StoredPolicyConfig{
-		ID: cfg.ID + "-policies",
-		Configuration: policyenginev1.Configuration{
-			Routes: routes,
-			Metadata: policyenginev1.Metadata{
-				CreatedAt:       now,
-				UpdatedAt:       now,
-				ResourceVersion: 0,
-				APIName:         apiData.DisplayName,
-				Version:         apiData.Version,
-				Context:         apiData.Context,
-			},
-		},
-		Version: 0,
-	}
-}
-
-// convertAPIPolicyToModel converts generated api.Policy to policyenginev1.PolicyInstance
-func convertAPIPolicyToModel(p api.Policy, attachedTo policy.Level) policyenginev1.PolicyInstance {
-	paramsMap := make(map[string]interface{})
-	if p.Params != nil {
-		for k, v := range *p.Params {
-			paramsMap[k] = v
-		}
-	}
-
-	// Add attachedTo metadata to parameters
-	if attachedTo != "" {
-		paramsMap["attachedTo"] = string(attachedTo)
-	}
-
-	return policyenginev1.PolicyInstance{
-		Name:               p.Name,
-		Version:            p.Version,
-		Enabled:            true, // Default to enabled
-		ExecutionCondition: p.ExecutionCondition,
-		Parameters:         paramsMap,
-	}
 }

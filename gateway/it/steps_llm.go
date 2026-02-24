@@ -28,8 +28,11 @@ import (
 	"github.com/wso2/api-platform/gateway/it/steps"
 )
 
-// RegisterLLMSteps registers all LLM provider template step definitions
+// RegisterLLMSteps registers all LLM provider template and provider step definitions
 func RegisterLLMSteps(ctx *godog.ScenarioContext, state *TestState, httpSteps *steps.HTTPSteps) {
+	// ========================================
+	// LLM Provider Template Steps
+	// ========================================
 	ctx.Step(`^I create this LLM provider template:$`, func(body *godog.DocString) error {
 		httpSteps.SetHeader("Content-Type", "application/yaml")
 		err := httpSteps.SendPOSTToService("gateway-controller", "/llm-provider-templates", body)
@@ -129,6 +132,34 @@ func RegisterLLMSteps(ctx *godog.ScenarioContext, state *TestState, httpSteps *s
 		}
 
 		return nil
+	})
+
+	// ========================================
+	// LLM Provider Steps
+	// ========================================
+	ctx.Step(`^I retrieve the LLM provider "([^"]*)"$`, func(providerID string) error {
+		return httpSteps.SendGETToService("gateway-controller", "/llm-providers/"+providerID)
+	})
+
+	ctx.Step(`^I list all LLM providers$`, func() error {
+		return httpSteps.SendGETToService("gateway-controller", "/llm-providers")
+	})
+
+	ctx.Step(`^I list LLM providers with filter "([^"]*)" as "([^"]*)"$`, func(filterKey, filterValue string) error {
+		return httpSteps.SendGETToService("gateway-controller", "/llm-providers?"+filterKey+"="+filterValue)
+	})
+
+	// ========================================
+	// LLM Proxy Steps
+	// ========================================
+	ctx.Step(`^I deploy this LLM proxy configuration:$`, func(body *godog.DocString) error {
+		httpSteps.SetHeader("Content-Type", "application/yaml")
+		return httpSteps.SendPOSTToService("gateway-controller", "/llm-proxies", body)
+	})
+
+	ctx.Step(`^I update the LLM proxy "([^"]*)" with:$`, func(proxyID string, body *godog.DocString) error {
+		httpSteps.SetHeader("Content-Type", "application/yaml")
+		return httpSteps.SendPUTToService("gateway-controller", "/llm-proxies/"+proxyID, body)
 	})
 
 	// Lazy resource assertion steps for config_dump
@@ -367,17 +398,18 @@ func assertLazyResourceNotExists(body []byte, templateID string) error {
 }
 
 // assertLazyResourceDisplayName checks that a lazy resource has the expected display name
+// It specifically looks for LlmProviderTemplate resources to handle cases where multiple
+// resource types may have the same ID (e.g., template and provider with same name)
 func assertLazyResourceDisplayName(body []byte, templateID, expectedDisplayName string) error {
 	var response ConfigDumpResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return fmt.Errorf("failed to parse config dump JSON: %w", err)
 	}
 
-	for _, resources := range response.LazyResources.ResourcesByType {
-		for _, resource := range resources {
+	// First, try to find in LlmProviderTemplate type specifically
+	if templates, exists := response.LazyResources.ResourcesByType["LlmProviderTemplate"]; exists {
+		for _, resource := range templates {
 			if resource.ID == templateID {
-				// The resource.Resource contains the template spec
-				// Navigate to spec.displayName
 				spec, ok := resource.Resource["spec"].(map[string]interface{})
 				if !ok {
 					return fmt.Errorf("resource %q does not have a valid spec field", templateID)
@@ -389,6 +421,27 @@ func assertLazyResourceDisplayName(body []byte, templateID, expectedDisplayName 
 				if displayName != expectedDisplayName {
 					return fmt.Errorf("expected display name %q for resource %q, got %q",
 						expectedDisplayName, templateID, displayName)
+				}
+				return nil
+			}
+		}
+	}
+
+	// Fallback: search all resource types for resources with spec.displayName
+	for resourceType, resources := range response.LazyResources.ResourcesByType {
+		for _, resource := range resources {
+			if resource.ID == templateID {
+				spec, ok := resource.Resource["spec"].(map[string]interface{})
+				if !ok {
+					continue // Skip resources without spec field
+				}
+				displayName, ok := spec["displayName"].(string)
+				if !ok {
+					continue // Skip resources without displayName
+				}
+				if displayName != expectedDisplayName {
+					return fmt.Errorf("expected display name %q for resource %q (type: %s), got %q",
+						expectedDisplayName, templateID, resourceType, displayName)
 				}
 				return nil
 			}

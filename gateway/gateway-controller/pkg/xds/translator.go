@@ -47,6 +47,7 @@ import (
 	common_dfp "github.com/envoyproxy/go-control-plane/envoy/extensions/common/dynamic_forward_proxy/v3"
 	dfpv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/dynamic_forward_proxy/v3"
 	extproc "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/ext_proc/v3"
+	luav3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/lua/v3"
 	router "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tlsv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
@@ -80,6 +81,12 @@ type Translator struct {
 	routerConfig *config.RouterConfig
 	certStore    *certstore.CertStore
 	config       *config.Config
+}
+
+// resolvedTimeout represents parsed timeout values for an upstream.
+// Currently only connect timeout is supported at the upstream definition level.
+type resolvedTimeout struct {
+	Connect *time.Duration
 }
 
 // NewTranslator creates a new translator
@@ -174,8 +181,17 @@ func (t *Translator) TranslateConfigs(
 	clusterMap := make(map[string]*cluster.Cluster)
 
 	for _, cfg := range configs {
-		// Include ALL configs (both deployed and pending) in the snapshot
-		// This ensures existing APIs are not overridden when deploying new APIs
+		// Skip undeployed APIs - they should not appear in xDS routes
+		if cfg.Status == models.StatusUndeployed {
+			log.Debug("Skipping undeployed API in xDS translation",
+				slog.String("id", cfg.ID),
+				slog.String("displayName", cfg.GetDisplayName()))
+			continue
+		}
+
+		// Include all non-undeployed configs (both deployed and pending) in the snapshot.
+		// Undeployed configs are excluded so only active/pending APIs appear in xDS,
+		// while ensuring existing deployed APIs are not overridden when deploying new ones.
 
 		// Create routes and clusters for this API
 		var routesList []*route.Route
@@ -291,14 +307,12 @@ func (t *Translator) TranslateConfigs(
 		clusters = append(clusters, c)
 	}
 
-	// Add policy engine cluster if enabled
-	if t.routerConfig.PolicyEngine.Enabled {
-		policyEngineCluster := t.createPolicyEngineCluster()
-		clusters = append(clusters, policyEngineCluster)
-	}
+	// Add policy engine cluster
+	policyEngineCluster := t.createPolicyEngineCluster()
+	clusters = append(clusters, policyEngineCluster)
 
 	// Add ALS cluster if gRPC access log is enabled
-	log.Debug("gRPC access log config", slog.Any("config", t.config.Analytics.GRPCAccessLogCfg))
+	log.Debug("gRPC event server config", slog.Any("config", t.config.Analytics.GRPCEventServerCfg))
 	if t.config.Analytics.Enabled {
 		log.Info("gRPC access log is enabled, creating ALS cluster")
 		alsCluster := t.createALSCluster()
@@ -328,7 +342,7 @@ func (t *Translator) TranslateConfigs(
 		if parsedURL.Scheme == "" {
 			parsedURL.Scheme = "http"
 		}
-		websubhubCluster := t.createCluster(constants.WEBSUBHUB_INTERNAL_CLUSTER_NAME, parsedURL, nil)
+		websubhubCluster := t.createCluster(constants.WEBSUBHUB_INTERNAL_CLUSTER_NAME, parsedURL, nil, nil)
 		clusters = append(clusters, websubhubCluster)
 		websubInternalListener, err := t.createInternalListenerForWebSubHub(false)
 		if err != nil {
@@ -413,7 +427,7 @@ func (t *Translator) translateAsyncAPIConfig(cfg *models.StoredConfig, allConfig
 	mainRoutesList := make([]*route.Route, 0)
 
 	// Determine effective vhosts (fallback to global router defaults when not provided)
-	effectiveMainVHost := t.config.GatewayController.Router.VHosts.Main.Default
+	effectiveMainVHost := t.config.Router.VHosts.Main.Default
 	if apiData.Vhosts != nil {
 		if strings.TrimSpace(apiData.Vhosts.Main) != "" {
 			effectiveMainVHost = apiData.Vhosts.Main
@@ -440,7 +454,7 @@ func (t *Translator) translateAsyncAPIConfig(cfg *models.StoredConfig, allConfig
 	// Extract template handle and provider name for LLM provider/proxy scenarios
 	templateHandle := t.extractTemplateHandle(cfg, allConfigs)
 	providerName := t.extractProviderName(cfg, allConfigs)
-	r := t.createRoute(cfg.ID, apiData.DisplayName, apiData.Version, apiData.Context, "POST", constants.WEBSUB_PATH, mainClusterName, "/", effectiveMainVHost, cfg.Kind, templateHandle, providerName, nil, apiProjectID)
+	r := t.createRoute(cfg.ID, apiData.DisplayName, apiData.Version, apiData.Context, "POST", constants.WEBSUB_PATH, mainClusterName, "/", effectiveMainVHost, cfg.Kind, templateHandle, providerName, nil, apiProjectID, nil)
 	routesList = append(routesList, mainRoutesList...)
 	routesList = append(routesList, r)
 
@@ -458,11 +472,18 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 	clusters := []*cluster.Cluster{}
 
 	// -------- MAIN UPSTREAM --------
-	mainClusterName, parsedMainURL, err := t.resolveUpstreamCluster("main", &apiData.Upstream.Main)
+	mainClusterName, parsedMainURL, mainTimeout, err := t.resolveUpstreamCluster("main", &apiData.Upstream.Main, apiData.UpstreamDefinitions)
 	if err != nil {
 		return nil, nil, err
 	}
-	mainCluster := t.createCluster(mainClusterName, parsedMainURL, nil)
+
+	// Timeout for main upstream cluster
+	var mainUpstreamClusterConnectTimeout *time.Duration
+	if mainTimeout != nil {
+		mainUpstreamClusterConnectTimeout = mainTimeout.Connect
+	}
+
+	mainCluster := t.createCluster(mainClusterName, parsedMainURL, nil, mainUpstreamClusterConnectTimeout)
 	clusters = append(clusters, mainCluster)
 
 	// Create routes for each operation (default to main cluster)
@@ -470,8 +491,8 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 	mainRoutesList := make([]*route.Route, 0)
 
 	// Determine effective vhosts (fallback to global router defaults when not provided)
-	effectiveMainVHost := t.config.GatewayController.Router.VHosts.Main.Default
-	effectiveSandboxVHost := t.config.GatewayController.Router.VHosts.Sandbox.Default
+	effectiveMainVHost := t.config.Router.VHosts.Main.Default
+	effectiveSandboxVHost := t.config.Router.VHosts.Sandbox.Default
 	if apiData.Vhosts != nil {
 		if strings.TrimSpace(apiData.Vhosts.Main) != "" {
 			effectiveMainVHost = apiData.Vhosts.Main
@@ -484,7 +505,7 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 	// Extract template handle and provider name for LLM provider/proxy scenarios
 	templateHandle := t.extractTemplateHandle(cfg, allConfigs)
 	providerName := t.extractProviderName(cfg, allConfigs)
-	
+
 	// Extract project ID from labels
 	apiProjectID := ""
 	if cfg.Configuration.Metadata.Labels != nil {
@@ -496,18 +517,25 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 	for _, op := range apiData.Operations {
 		// Use mainClusterName by default; path rewrite based on main upstream path
 		r := t.createRoute(cfg.ID, apiData.DisplayName, apiData.Version, apiData.Context, string(op.Method), op.Path,
-			mainClusterName, parsedMainURL.Path, effectiveMainVHost, cfg.Kind, templateHandle, providerName, apiData.Upstream.Main.HostRewrite, apiProjectID)
+			mainClusterName, parsedMainURL.Path, effectiveMainVHost, cfg.Kind, templateHandle, providerName, apiData.Upstream.Main.HostRewrite, apiProjectID, mainTimeout)
 		mainRoutesList = append(mainRoutesList, r)
 	}
 	routesList = append(routesList, mainRoutesList...)
 
 	// -------- SANDBOX UPSTREAM --------
 	if apiData.Upstream.Sandbox != nil {
-		sbClusterName, parsedSbURL, err := t.resolveUpstreamCluster("sandbox", apiData.Upstream.Sandbox)
+		sbClusterName, parsedSbURL, sbTimeout, err := t.resolveUpstreamCluster("sandbox", apiData.Upstream.Sandbox, apiData.UpstreamDefinitions)
 		if err != nil {
 			return nil, nil, err
 		}
-		sandboxCluster := t.createCluster(sbClusterName, parsedSbURL, nil)
+
+		// Timeout for sandbox upstream cluster
+		var sbUpstreamClusterConnectTimeout *time.Duration
+		if sbTimeout != nil {
+			sbUpstreamClusterConnectTimeout = sbTimeout.Connect
+		}
+
+		sandboxCluster := t.createCluster(sbClusterName, parsedSbURL, nil, sbUpstreamClusterConnectTimeout)
 		clusters = append(clusters, sandboxCluster)
 
 		// Create sandbox routes for each operation
@@ -515,7 +543,7 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 		for _, op := range apiData.Operations {
 			// Use sbClusterName for sandbox upstream path
 			r := t.createRoute(cfg.ID, apiData.DisplayName, apiData.Version, apiData.Context, string(op.Method), op.Path,
-				sbClusterName, parsedSbURL.Path, effectiveSandboxVHost, cfg.Kind, templateHandle, providerName, apiData.Upstream.Sandbox.HostRewrite, apiProjectID)
+				sbClusterName, parsedSbURL.Path, effectiveSandboxVHost, cfg.Kind, templateHandle, providerName, apiData.Upstream.Sandbox.HostRewrite, apiProjectID, sbTimeout)
 			sbRoutesList = append(sbRoutesList, r)
 		}
 		routesList = append(routesList, sbRoutesList...)
@@ -525,32 +553,57 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 }
 
 // resolveUpstreamCluster validates an upstream (main or sandbox) and creates its cluster.
-// Returns clusterName, parsedURL, and error.
-func (t *Translator) resolveUpstreamCluster(upstreamName string, up *api.Upstream) (string, *url.URL, error) {
-	// Validate URL or ref
+// Returns clusterName, parsedURL, timeout (can be nil), and error.
+func (t *Translator) resolveUpstreamCluster(upstreamName string, up *api.Upstream, upstreamDefinitions *[]api.UpstreamDefinition) (string, *url.URL, *resolvedTimeout, error) {
 	var rawURL string
+	var timeout *resolvedTimeout
+
+	// Resolve URL and timeout
 	if up.Url != nil && strings.TrimSpace(*up.Url) != "" {
+		// Direct URL provided
 		rawURL = strings.TrimSpace(*up.Url)
+		// No timeout override when using direct URL
+		timeout = nil
 	} else if up.Ref != nil && strings.TrimSpace(*up.Ref) != "" {
-		return "", nil, fmt.Errorf("upstream ref is not supported yet for %s: %s",
-			upstreamName, strings.TrimSpace(*up.Ref))
+		// Reference to upstream definition
+		refName := strings.TrimSpace(*up.Ref)
+		definition, err := resolveUpstreamDefinition(refName, upstreamDefinitions)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("failed to resolve %s upstream ref: %w", upstreamName, err)
+		}
+
+		// Extract URL from the first upstream target in the definition
+		// TODO: Support multiple upstream targets
+		if len(definition.Upstreams) == 0 || len(definition.Upstreams[0].Urls) == 0 {
+			return "", nil, nil, fmt.Errorf("upstream definition '%s' has no URLs configured", refName)
+		}
+		rawURL = definition.Upstreams[0].Urls[0]
+
+		// Extract timeout if specified in the definition (may be nil)
+		if definition.Timeout != nil {
+			resolved, err := resolveTimeoutFromDefinition(definition)
+			if err != nil {
+				return "", nil, nil, fmt.Errorf("invalid timeout in upstream definition '%s': %w", refName, err)
+			}
+			timeout = resolved
+		}
 	} else {
-		return "", nil, fmt.Errorf("no %s upstream configured", upstreamName)
+		return "", nil, nil, fmt.Errorf("no %s upstream configured", upstreamName)
 	}
 
 	// Parse URL
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid %s upstream URL: %w", upstreamName, err)
+		return "", nil, nil, fmt.Errorf("invalid %s upstream URL: %w", upstreamName, err)
 	}
 	if parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		return "", nil, fmt.Errorf("invalid %s upstream URL: must include host and http/https scheme", upstreamName)
+		return "", nil, nil, fmt.Errorf("invalid %s upstream URL: must include host and http/https scheme", upstreamName)
 	}
 
 	// Generate cluster name
 	clusterName := t.sanitizeClusterName(parsedURL.Host, parsedURL.Scheme)
 
-	return clusterName, parsedURL, nil
+	return clusterName, parsedURL, timeout, nil
 }
 
 // SharedRouteConfigName is the name of the shared route configuration used by both HTTP and HTTPS listeners
@@ -572,14 +625,18 @@ func (t *Translator) createListener(virtualHosts []*route.VirtualHost, isHTTPS b
 	// Build HTTP filters chain
 	httpFilters := make([]*hcm.HttpFilter, 0)
 
-	// Add ext_proc filter if policy engine is enabled
-	if t.routerConfig.PolicyEngine.Enabled {
-		extProcFilter, err := t.createExtProcFilter()
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create ext_proc filter: %w", err)
-		}
-		httpFilters = append(httpFilters, extProcFilter)
+	// Add ext_proc filter for policy engine
+	extProcFilter, err := t.createExtProcFilter()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create ext_proc filter: %w", err)
 	}
+	httpFilters = append(httpFilters, extProcFilter)
+
+	luaFilter, err := t.createLuaFilter()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create lua filter: %w", err)
+	}
+	httpFilters = append(httpFilters, luaFilter)
 
 	// Add router filter (must be last)
 	httpFilters = append(httpFilters, &hcm.HttpFilter{
@@ -724,14 +781,18 @@ func (t *Translator) createInternalListenerForWebSubHub(isHTTPS bool) (*listener
 	// Build HTTP filters chain
 	httpFilters := make([]*hcm.HttpFilter, 0)
 
-	// Add ext_proc filter if policy engine is enabled
-	if t.routerConfig.PolicyEngine.Enabled {
-		extProcFilter, err := t.createExtProcFilter()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create ext_proc filter: %w", err)
-		}
-		httpFilters = append(httpFilters, extProcFilter)
+	// Add ext_proc filter for policy engine
+	extProcFilter, err := t.createExtProcFilter()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ext_proc filter: %w", err)
 	}
+	httpFilters = append(httpFilters, extProcFilter)
+
+	luaFilter, err := t.createLuaFilter()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create lua filter: %w", err)
+	}
+	httpFilters = append(httpFilters, luaFilter)
 
 	// Add router filter (must be last)
 	httpFilters = append(httpFilters, &hcm.HttpFilter{
@@ -934,14 +995,18 @@ func (t *Translator) createDynamicFwdListenerForWebSubHub(isHTTPS bool) (*listen
 	// Build HTTP filters chain
 	httpFilters := make([]*hcm.HttpFilter, 0)
 
-	// Add ext_proc filter if policy engine is enabled
-	if t.routerConfig.PolicyEngine.Enabled {
-		extProcFilter, err := t.createExtProcFilter()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create ext_proc filter: %w", err)
-		}
-		httpFilters = append(httpFilters, extProcFilter)
+	// Add ext_proc filter for policy engine
+	extProcFilter, err := t.createExtProcFilter()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ext_proc filter: %w", err)
 	}
+	httpFilters = append(httpFilters, extProcFilter)
+
+	luaFilter, err := t.createLuaFilter()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create lua filter: %w", err)
+	}
+	httpFilters = append(httpFilters, luaFilter)
 
 	dnsCacheConfig := &common_dfp.DnsCacheConfig{
 		// Required: unique name for the shared DNS cache
@@ -1193,7 +1258,7 @@ func (t *Translator) extractTemplateHandle(cfg *models.StoredConfig, allConfigs 
 
 	// For LlmProxy: resolve provider reference
 	case string(api.LlmProxy):
-		providerName, err := getValueFromSourceConfig(cfg.SourceConfiguration, "spec.provider")
+		providerName, err := getValueFromSourceConfig(cfg.SourceConfiguration, "spec.provider.id")
 		if err != nil {
 			t.logger.Debug("Failed to extract provider name from LlmProxy", slog.Any("error", err))
 			return ""
@@ -1258,8 +1323,8 @@ func (t *Translator) extractProviderName(cfg *models.StoredConfig, allConfigs []
 		}
 
 	case string(api.LlmProxy):
-		// For LlmProxy: return the referenced provider name from spec.provider
-		providerName, err := getValueFromSourceConfig(cfg.SourceConfiguration, "spec.provider")
+		// For LlmProxy: return the referenced provider name from spec.provider.id
+		providerName, err := getValueFromSourceConfig(cfg.SourceConfiguration, "spec.provider.id")
 		if err != nil {
 			t.logger.Debug("Failed to extract provider reference from LlmProxy", slog.Any("error", err))
 			return ""
@@ -1274,7 +1339,7 @@ func (t *Translator) extractProviderName(cfg *models.StoredConfig, allConfigs []
 
 // createRoute creates a route for an operation
 func (t *Translator) createRoute(apiId, apiName, apiVersion, context, method, path, clusterName,
-	upstreamPath string, vhost string, apiKind string, templateHandle string, providerName string, hostRewrite *api.UpstreamHostRewrite, projectID string) *route.Route {
+	upstreamPath string, vhost string, apiKind string, templateHandle string, providerName string, hostRewrite *api.UpstreamHostRewrite, projectID string, timeoutCfg *resolvedTimeout) *route.Route {
 	// Resolve version placeholder in context
 	context = strings.ReplaceAll(context, "$version", apiVersion)
 
@@ -1316,13 +1381,14 @@ func (t *Translator) createRoute(apiId, apiName, apiVersion, context, method, pa
 		}
 	}
 
+	// Currently the route level timeouts are configurable using the global configuration.
 	routeAction := &route.Route_Route{
 		Route: &route.RouteAction{
 			Timeout: durationpb.New(
-				time.Duration(t.routerConfig.Upstream.Timeouts.RouteTimeoutInSeconds) * time.Second,
+				time.Duration(t.routerConfig.Upstream.Timeouts.RouteTimeoutMs) * time.Millisecond,
 			),
 			IdleTimeout: durationpb.New(
-				time.Duration(t.routerConfig.Upstream.Timeouts.RouteIdleTimeoutInSeconds) * time.Second,
+				time.Duration(t.routerConfig.Upstream.Timeouts.RouteIdleTimeoutMs) * time.Millisecond,
 			),
 			ClusterSpecifier: &route.RouteAction_Cluster{
 				Cluster: clusterName,
@@ -1498,12 +1564,23 @@ func (t *Translator) createCluster(
 	name string,
 	upstreamURL *url.URL,
 	upstreamCerts map[string][]byte,
+	connectTimeout *time.Duration,
 ) *cluster.Cluster {
 	endpoints, transportSocketMatch := t.processEndpoint(upstreamURL, upstreamCerts)
 
+	var effectiveConnectTimeout time.Duration
+	if connectTimeout != nil {
+		effectiveConnectTimeout = *connectTimeout
+	} else {
+		effectiveConnectTimeout = time.Duration(t.routerConfig.Upstream.Timeouts.ConnectTimeoutMs) * time.Millisecond
+		if effectiveConnectTimeout == 0 {
+			effectiveConnectTimeout = 5 * time.Second
+		}
+	}
+
 	c := &cluster.Cluster{
 		Name:                 name,
-		ConnectTimeout:       durationpb.New(5 * time.Second),
+		ConnectTimeout:       durationpb.New(effectiveConnectTimeout),
 		ClusterDiscoveryType: &cluster.Cluster_Type{Type: cluster.Cluster_STRICT_DNS},
 		LoadAssignment: &endpoint.ClusterLoadAssignment{
 			ClusterName: name,
@@ -1522,17 +1599,31 @@ func (t *Translator) createCluster(
 func (t *Translator) createPolicyEngineCluster() *cluster.Cluster {
 	policyEngine := t.routerConfig.PolicyEngine
 
-	// Build the endpoint address
-	address := &core.Address{
-		Address: &core.Address_SocketAddress{
-			SocketAddress: &core.SocketAddress{
-				Protocol: core.SocketAddress_TCP,
-				Address:  policyEngine.Host,
-				PortSpecifier: &core.SocketAddress_PortValue{
-					PortValue: policyEngine.Port,
+	// Build the endpoint address (UDS or TCP)
+	var address *core.Address
+
+	if policyEngine.Mode == "tcp" {
+		// TCP mode - use host:port
+		address = &core.Address{
+			Address: &core.Address_SocketAddress{
+				SocketAddress: &core.SocketAddress{
+					Protocol: core.SocketAddress_TCP,
+					Address:  policyEngine.Host,
+					PortSpecifier: &core.SocketAddress_PortValue{
+						PortValue: policyEngine.Port,
+					},
 				},
 			},
-		},
+		}
+	} else {
+		// UDS mode (default) - use Unix domain socket with constant path
+		address = &core.Address{
+			Address: &core.Address_Pipe{
+				Pipe: &core.Pipe{
+					Path: constants.DefaultPolicyEngineSocketPath,
+				},
+			},
+		}
 	}
 
 	// Create the load balancing endpoint
@@ -1549,11 +1640,18 @@ func (t *Translator) createPolicyEngineCluster() *cluster.Cluster {
 		LbEndpoints: []*endpoint.LbEndpoint{lbEndpoint},
 	}
 
+	// Determine cluster discovery type based on connection mode
+	// UDS uses STATIC (no DNS resolution needed), TCP uses STRICT_DNS
+	clusterType := cluster.Cluster_STATIC
+	if policyEngine.Mode == "tcp" {
+		clusterType = cluster.Cluster_STRICT_DNS
+	}
+
 	// Create the cluster with HTTP/2 support for gRPC
 	c := &cluster.Cluster{
 		Name:                 constants.PolicyEngineClusterName,
 		ConnectTimeout:       durationpb.New(5 * time.Second),
-		ClusterDiscoveryType: &cluster.Cluster_Type{Type: cluster.Cluster_STRICT_DNS},
+		ClusterDiscoveryType: &cluster.Cluster_Type{Type: clusterType},
 		LbPolicy:             cluster.Cluster_ROUND_ROBIN,
 		LoadAssignment: &endpoint.ClusterLoadAssignment{
 			ClusterName: constants.PolicyEngineClusterName,
@@ -1636,18 +1734,33 @@ func (t *Translator) createPolicyEngineCluster() *cluster.Cluster {
 
 // createALSCluster creates an Envoy cluster for the gRPC access log service
 func (t *Translator) createALSCluster() *cluster.Cluster {
-	grpcConfig := t.config.Analytics.GRPCAccessLogCfg
+	grpcConfig := t.config.Analytics.GRPCEventServerCfg
 
-	address := &core.Address{
-		Address: &core.Address_SocketAddress{
-			SocketAddress: &core.SocketAddress{
-				Protocol: core.SocketAddress_TCP,
-				Address:  grpcConfig.Host,
-				PortSpecifier: &core.SocketAddress_PortValue{
-					PortValue: uint32(t.config.Analytics.AccessLogsServiceCfg.ALSServerPort),
+	// Build the endpoint address (UDS or TCP)
+	var address *core.Address
+
+	if grpcConfig.Mode == "tcp" {
+		// TCP mode - use host:port
+		address = &core.Address{
+			Address: &core.Address_SocketAddress{
+				SocketAddress: &core.SocketAddress{
+					Protocol: core.SocketAddress_TCP,
+					Address:  t.config.Router.PolicyEngine.Host,
+					PortSpecifier: &core.SocketAddress_PortValue{
+						PortValue: uint32(grpcConfig.Port),
+					},
 				},
 			},
-		},
+		}
+	} else {
+		// UDS mode (default) - use Unix domain socket with constant path
+		address = &core.Address{
+			Address: &core.Address_Pipe{
+				Pipe: &core.Pipe{
+					Path: constants.DefaultALSSocketPath,
+				},
+			},
+		}
 	}
 
 	lbEndpoint := &endpoint.LbEndpoint{
@@ -1662,10 +1775,16 @@ func (t *Translator) createALSCluster() *cluster.Cluster {
 		LbEndpoints: []*endpoint.LbEndpoint{lbEndpoint},
 	}
 
+	// UDS uses STATIC (no DNS resolution needed), TCP uses STRICT_DNS
+	clusterType := cluster.Cluster_STATIC
+	if grpcConfig.Mode == "tcp" {
+		clusterType = cluster.Cluster_STRICT_DNS
+	}
+
 	return &cluster.Cluster{
 		Name:                 constants.GRPCAccessLogClusterName,
 		ConnectTimeout:       durationpb.New(5 * time.Second),
-		ClusterDiscoveryType: &cluster.Cluster_Type{Type: cluster.Cluster_STRICT_DNS},
+		ClusterDiscoveryType: &cluster.Cluster_Type{Type: clusterType},
 		LbPolicy:             cluster.Cluster_ROUND_ROBIN,
 		LoadAssignment: &endpoint.ClusterLoadAssignment{
 			ClusterName: constants.GRPCAccessLogClusterName,
@@ -1758,11 +1877,11 @@ func (t *Translator) createSDSCluster() *cluster.Cluster {
 	// In containerized environments, Envoy connects to the gateway-controller container
 	// Use the same host/port configuration as the main xDS connection
 	xdsHost := "gateway-controller" // Default for Docker Compose
-	if envHost := os.Getenv("XDS_SERVER_HOST"); envHost != "" {
+	if envHost := os.Getenv("GATEWAY_CONTROLLER_HOST"); envHost != "" {
 		xdsHost = envHost
 	}
 
-	xdsPort := t.config.GatewayController.Server.XDSPort
+	xdsPort := t.config.Controller.Server.XDSPort
 	if xdsPort == 0 {
 		xdsPort = 18000 // Default xDS port
 	}
@@ -2247,12 +2366,12 @@ func (t *Translator) createAccessLogConfig() ([]*accesslog.AccessLog, error) {
 
 // createGRPCAccessLog creates a gRPC access log configuration for the gateway controller
 func (t *Translator) createGRPCAccessLog() (*accesslog.AccessLog, error) {
-	grpcConfig := t.config.Analytics.GRPCAccessLogCfg
+	grpcConfig := t.config.Analytics.GRPCEventServerCfg
 
 	httpGrpcAccessLog := &grpc_accesslogv3.HttpGrpcAccessLogConfig{
 		CommonConfig: &grpc_accesslogv3.CommonGrpcAccessLogConfig{
 			TransportApiVersion: corev3.ApiVersion_V3,
-			LogName:             grpcConfig.LogName,
+			LogName:             constants.DefaultALSLogName,
 			BufferFlushInterval: durationpb.New(time.Duration(grpcConfig.BufferFlushInterval)),
 			BufferSizeBytes:     wrapperspb.UInt32(uint32(grpcConfig.BufferSizeBytes)),
 			GrpcService: &corev3.GrpcService{
@@ -2287,7 +2406,7 @@ func (t *Translator) createTracingConfig() (*hcm.HttpConnectionManager_Tracing, 
 	}
 
 	// Determine service name with fallback
-	serviceName := t.config.GatewayController.Router.TracingServiceName
+	serviceName := t.config.Router.TracingServiceName
 	if serviceName == "" {
 		serviceName = "envoy-gateway"
 	}
@@ -2348,6 +2467,43 @@ func convertToInterface(m map[string]string) map[string]interface{} {
 	return result
 }
 
+// createLuaFilter creates an Envoy lua filter for request transformation
+func (t *Translator) createLuaFilter() (*hcm.HttpFilter, error) {
+	luaScriptPath := strings.TrimSpace(t.routerConfig.Lua.RequestTransformation.ScriptPath)
+	if luaScriptPath == "" {
+		luaScriptPath = strings.TrimSpace(t.routerConfig.LuaScriptPath)
+	}
+	if luaScriptPath == "" {
+		luaScriptPath = config.DefaultLuaScriptPath
+	}
+
+	scriptBytes, err := os.ReadFile(luaScriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read lua script from %s: %w", luaScriptPath, err)
+	}
+
+	script := strings.TrimSpace(string(scriptBytes))
+	if script == "" {
+		return nil, fmt.Errorf("lua script at %s is empty", luaScriptPath)
+	}
+
+	luaConfig := &luav3.Lua{
+		InlineCode: string(scriptBytes),
+	}
+
+	luaAny, err := anypb.New(luaConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal lua config: %w", err)
+	}
+
+	return &hcm.HttpFilter{
+		Name: "envoy.filters.http.lua",
+		ConfigType: &hcm.HttpFilter_TypedConfig{
+			TypedConfig: luaAny,
+		},
+	}, nil
+}
+
 // createExtProcFilter creates an Envoy ext_proc filter for policy engine integration
 func (t *Translator) createExtProcFilter() (*hcm.HttpFilter, error) {
 	policyEngine := t.routerConfig.PolicyEngine
@@ -2359,15 +2515,6 @@ func (t *Translator) createExtProcFilter() (*hcm.HttpFilter, error) {
 		routeCacheAction = extproc.ExternalProcessor_RETAIN
 	case constants.ExtProcRouteCacheActionClear:
 		routeCacheAction = extproc.ExternalProcessor_CLEAR
-	}
-
-	// Convert request header mode string to enum
-	requestHeaderMode := extproc.ProcessingMode_DEFAULT
-	switch policyEngine.RequestHeaderMode {
-	case constants.ExtProcHeaderModeSend:
-		requestHeaderMode = extproc.ProcessingMode_SEND
-	case constants.ExtProcHeaderModeSkip:
-		requestHeaderMode = extproc.ProcessingMode_SKIP
 	}
 
 	// Create ext_proc configuration
@@ -2385,7 +2532,7 @@ func (t *Translator) createExtProcFilter() (*hcm.HttpFilter, error) {
 		AllowModeOverride: policyEngine.AllowModeOverride,
 		RequestAttributes: []string{constants.ExtProcRequestAttributeRouteName, constants.ExtProcRequestAttributeRouteMetadata},
 		ProcessingMode: &extproc.ProcessingMode{
-			RequestHeaderMode: requestHeaderMode,
+			RequestHeaderMode: extproc.ProcessingMode_SEND,
 		},
 		MessageTimeout: durationpb.New(time.Duration(policyEngine.MessageTimeoutMs) * time.Millisecond),
 		MutationRules: &mutationrules.HeaderMutationRules{
@@ -2393,10 +2540,10 @@ func (t *Translator) createExtProcFilter() (*hcm.HttpFilter, error) {
 		},
 		MetadataOptions: &extproc.MetadataOptions{
 			ReceivingNamespaces: &extproc.MetadataOptions_MetadataNamespaces{
-				Untyped: []string{constants.ExtProcFilterName},
+				Untyped: []string{constants.ExtProcMetadataNamespace},
 			},
 			ForwardingNamespaces: &extproc.MetadataOptions_MetadataNamespaces{
-				Untyped: []string{constants.ExtProcFilterName},
+				Untyped: []string{constants.ExtProcMetadataNamespace},
 			},
 		},
 	}
@@ -2413,4 +2560,60 @@ func (t *Translator) createExtProcFilter() (*hcm.HttpFilter, error) {
 			TypedConfig: extProcAny,
 		},
 	}, nil
+}
+
+// resolveUpstreamDefinition finds an upstream definition by its reference name
+// Returns the upstream definition and error if not found
+func resolveUpstreamDefinition(ref string, definitions *[]api.UpstreamDefinition) (*api.UpstreamDefinition, error) {
+	if definitions == nil {
+		return nil, fmt.Errorf("upstream definition '%s' not found: no definitions provided", ref)
+	}
+
+	for _, def := range *definitions {
+		if def.Name == ref {
+			return &def, nil
+		}
+	}
+
+	return nil, fmt.Errorf("upstream definition '%s' not found", ref)
+}
+
+// parseTimeout parses a duration string (e.g., "30s", "1m", "500ms") and returns a time.Duration.
+// Returns nil if the input is nil or empty.
+func parseTimeout(timeoutStr *string) (*time.Duration, error) {
+	if timeoutStr == nil || strings.TrimSpace(*timeoutStr) == "" {
+		return nil, nil
+	}
+
+	duration, err := time.ParseDuration(strings.TrimSpace(*timeoutStr))
+	if err != nil {
+		return nil, fmt.Errorf("invalid timeout format: %w", err)
+	}
+
+	if duration <= 0 {
+		return nil, fmt.Errorf("timeout must be positive, got: %v", duration)
+	}
+
+	return &duration, nil
+}
+
+// resolveTimeoutFromDefinition converts an UpstreamDefinition's timeout block into a resolvedTimeout.
+// Returns nil if there is no timeout block or all fields are empty.
+func resolveTimeoutFromDefinition(def *api.UpstreamDefinition) (*resolvedTimeout, error) {
+	if def == nil || def.Timeout == nil {
+		return nil, nil
+	}
+
+	var rt resolvedTimeout
+	var err error
+
+	if rt.Connect, err = parseTimeout(def.Timeout.Connect); err != nil {
+		return nil, err
+	}
+
+	if rt.Connect == nil {
+		return nil, nil
+	}
+
+	return &rt, nil
 }

@@ -30,6 +30,9 @@ type GatewayEventDTO struct {
 
 	// CorrelationID provides request tracing identifier
 	CorrelationID string `json:"correlationId"`
+
+	// UserId is an optional temporary user identifier (from x-user-id header)
+	UserId string `json:"userId,omitempty"`
 }
 
 // ConnectionAckDTO represents the acknowledgment message sent when a gateway connects.
@@ -47,13 +50,13 @@ type ConnectionAckDTO struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// APIDeploymentEventDTO is the wire format for API deployment notifications.
-type APIDeploymentEventDTO struct {
+// DeploymentEventDTO is the wire format for API deployment notifications.
+type DeploymentEventDTO struct {
 	// ApiId identifies the deployed API
 	ApiId string `json:"apiId"`
 
-	// RevisionID identifies the specific API revision
-	RevisionID string `json:"revisionId"`
+	// DeploymentID identifies the specific API deployment
+	DeploymentID string `json:"deploymentId"`
 
 	// Vhost specifies the virtual host
 	Vhost string `json:"vhost"`
@@ -66,6 +69,60 @@ type APIDeploymentEventDTO struct {
 type APIUndeploymentEventDTO struct {
 	// ApiId identifies the undeployed API
 	ApiId string `json:"apiId"`
+
+	// Vhost specifies the virtual host
+	Vhost string `json:"vhost"`
+
+	// Environment specifies the deployment environment
+	Environment string `json:"environment"`
+}
+
+// LLMProviderDeploymentEventDTO is the wire format for LLM provider deployment notifications.
+type LLMProviderDeploymentEventDTO struct {
+	// ProviderId identifies the deployed LLM provider (handle)
+	ProviderId string `json:"providerId"`
+
+	// DeploymentID identifies the specific deployment artifact
+	DeploymentID string `json:"deploymentId"`
+
+	// Vhost specifies the virtual host
+	Vhost string `json:"vhost"`
+
+	// Environment specifies the deployment environment
+	Environment string `json:"environment"`
+}
+
+// LLMProviderUndeploymentEventDTO is the wire format for LLM provider undeployment notifications.
+type LLMProviderUndeploymentEventDTO struct {
+	// ProviderId identifies the undeployed LLM provider (handle)
+	ProviderId string `json:"providerId"`
+
+	// Vhost specifies the virtual host
+	Vhost string `json:"vhost"`
+
+	// Environment specifies the deployment environment
+	Environment string `json:"environment"`
+}
+
+// LLMProxyDeploymentEventDTO is the wire format for LLM proxy deployment notifications.
+type LLMProxyDeploymentEventDTO struct {
+	// ProxyId identifies the deployed LLM proxy (handle)
+	ProxyId string `json:"proxyId"`
+
+	// DeploymentID identifies the specific deployment artifact
+	DeploymentID string `json:"deploymentId"`
+
+	// Vhost specifies the virtual host
+	Vhost string `json:"vhost"`
+
+	// Environment specifies the deployment environment
+	Environment string `json:"environment"`
+}
+
+// LLMProxyUndeploymentEventDTO is the wire format for LLM proxy undeployment notifications.
+type LLMProxyUndeploymentEventDTO struct {
+	// ProxyId identifies the undeployed LLM proxy (handle)
+	ProxyId string `json:"proxyId"`
 
 	// Vhost specifies the virtual host
 	Vhost string `json:"vhost"`

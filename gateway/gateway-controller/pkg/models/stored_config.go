@@ -29,9 +29,10 @@ import (
 type ConfigStatus string
 
 const (
-	StatusPending  ConfigStatus = "pending"  // Submitted but not yet deployed
-	StatusDeployed ConfigStatus = "deployed" // Active in Router
-	StatusFailed   ConfigStatus = "failed"   // Deployment failed
+	StatusPending    ConfigStatus = "pending"    // Submitted but not yet deployed
+	StatusDeployed   ConfigStatus = "deployed"   // Active in Router
+	StatusFailed     ConfigStatus = "failed"     // Deployment failed
+	StatusUndeployed ConfigStatus = "undeployed" // Removed from Router but config preserved
 )
 
 // StoredConfig represents the configuration stored in the database and in-memory
@@ -41,9 +42,9 @@ type StoredConfig struct {
 	Configuration       api.APIConfiguration `json:"configuration"`
 	SourceConfiguration any                  `json:"source_configuration,omitempty"`
 	Status              ConfigStatus         `json:"status"`
-	CreatedAt           time.Time            `json:"created_at"`
-	UpdatedAt           time.Time            `json:"updated_at"`
-	DeployedAt          *time.Time           `json:"deployed_at,omitempty"`
+	CreatedAt           time.Time            `json:"createdAt"`
+	UpdatedAt           time.Time            `json:"updatedAt"`
+	DeployedAt          *time.Time           `json:"deployedAt,omitempty"`
 	DeployedVersion     int64                `json:"deployed_version"`
 }
 

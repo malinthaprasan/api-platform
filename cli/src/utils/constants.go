@@ -25,19 +25,16 @@ const (
 	ConfigPath        = ".wso2ap/config.yaml"
 	CachePath         = ".wso2ap/cache"
 	PoliciesCachePath = ".wso2ap/cache/policies"
-	TempPath          = ".wso2ap/.tmp"
 )
 
 // Gateway
 const (
 	// Image Build Defaults
-	DefaultManifestFile         = "policy-manifest.yaml"
-	DefaultManifestLockFile     = "policy-manifest-lock.yaml"
-	DefaultGatewayVersion       = "latest"
-	DefaultImageRepository      = "ghcr.io/wso2/api-platform"
-	DefaultGatewayBuilderRepo   = "ghcr.io/wso2/api-platform/gateway-builder"
-	DefaultGatewayControllerImg = "" // Uses default from gateway-builder
-	DefaultRouterImg            = "" // Uses default from gateway-builder
+	DefaultBuildFile         = "build.yaml"
+	DefaultImageRepository   = "ghcr.io/wso2/api-platform"
+	DefaultGatewayBuilder    = "ghcr.io/wso2/api-platform/gateway-builder:%s"    // %s = version
+	DefaultGatewayController = "ghcr.io/wso2/api-platform/gateway-controller:%s" // %s = version
+	DefaultGatewayRuntime    = "ghcr.io/wso2/api-platform/gateway-runtime:%s"    // %s = version
 
 	// REST API Endpoints
 	GatewayHealthPath       = "/health"

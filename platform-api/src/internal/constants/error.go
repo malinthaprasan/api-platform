@@ -53,28 +53,39 @@ var (
 	ErrInvalidLifecycleState       = errors.New("invalid lifecycle state")
 	ErrInvalidAPIType              = errors.New("invalid api type")
 	ErrInvalidTransport            = errors.New("invalid transport protocol")
-	ErrInvalidAPIDeployment        = errors.New("invalid api deployment")
+	ErrInvalidDeployment           = errors.New("invalid api deployment")
 	ErrGatewayNotAssociated        = errors.New("api is not associated with gateway")
 	ErrAPIContextVersionConflict   = errors.New("api with same context and version already deployed in gateway")
+	ErrUpstreamRequired            = errors.New("upstream configuration is required")
 )
 
 var (
 	ErrGatewayNotFound          = errors.New("gateway not found")
 	ErrGatewayAlreadyAssociated = errors.New("gateway already associated with API")
 	ErrGatewayHasAssociatedAPIs = errors.New("cannot delete gateway: it has associated APIs. Please remove all API associations before deleting the gateway")
+	ErrGatewayHasDeployments    = errors.New("cannot delete gateway: it has active API deployments. Please undeploy all APIs before deleting the gateway")
 )
 
 var (
-	ErrDeploymentNotFound      = errors.New("deployment not found")
-	ErrDeploymentNotActive     = errors.New("no active deployment found for this API on the gateway")
-	ErrDeploymentIsDeployed    = errors.New("cannot delete an active deployment - undeploy it first")
-	ErrDeploymentAlreadyActive = errors.New("deployment is already active")
-	ErrBaseDeploymentNotFound  = errors.New("base deployment not found")
-	ErrInvalidDeploymentStatus = errors.New("invalid deployment status")
+	ErrDeploymentNotFound          = errors.New("deployment not found")
+	ErrDeploymentNotActive         = errors.New("no active deployment found for this API on the gateway")
+	ErrDeploymentIsDeployed        = errors.New("cannot delete an active deployment - undeploy it first")
+	ErrDeploymentAlreadyActive     = errors.New("deployment is already active")
+	ErrBaseDeploymentNotFound      = errors.New("base deployment not found")
+	ErrInvalidDeploymentStatus     = errors.New("invalid deployment status")
+	ErrDeploymentNameRequired      = errors.New("deployment name is required")
+	ErrDeploymentBaseRequired      = errors.New("base is required")
+	ErrDeploymentGatewayIDRequired = errors.New("gatewayId is required")
+	ErrAPINoBackendServices        = errors.New("API must have at least one backend service attached before deployment")
+	ErrDeploymentAlreadyDeployed   = errors.New("cannot restore to the currently deployed deployment")
+	ErrGatewayIDMismatch           = errors.New("gateway ID mismatch: deployment is bound to a different gateway")
 )
 
 var (
-	ErrApiPortalSync = errors.New("failed to synchronize with dev portal")
+	ErrApiPortalSync       = errors.New("failed to synchronize with dev portal")
+	ErrArtifactNotFound    = errors.New("artifact not found")
+	ErrArtifactExists      = errors.New("artifact already exists")
+	ErrArtifactInvalidKind = errors.New("invalid artifact kind")
 )
 
 var (
@@ -115,4 +126,25 @@ var (
 	ErrConfigFileNotFound   = errors.New("API Project config file not found")
 	ErrOpenAPIFileNotFound  = errors.New("OpenAPI definition file not found")
 	ErrWSO2ArtifactNotFound = errors.New("WSO2 API artifact not found")
+)
+
+var (
+	ErrLLMProviderTemplateExists   = errors.New("llm provider template already exists")
+	ErrLLMProviderTemplateNotFound = errors.New("llm provider template not found")
+	ErrLLMProviderExists           = errors.New("llm provider already exists")
+	ErrLLMProviderNotFound         = errors.New("llm provider not found")
+	ErrLLMProviderLimitReached     = errors.New("llm provider limit reached for organization")
+	ErrLLMProxyExists              = errors.New("llm proxy already exists")
+	ErrLLMProxyNotFound            = errors.New("llm proxy not found")
+	ErrLLMProxyLimitReached        = errors.New("llm proxy limit reached for organization")
+)
+
+var (
+	// API Key errors
+	ErrAPIKeyNotFound      = errors.New("api key not found")
+	ErrAPIKeyAlreadyExists = errors.New("api key already exists")
+	ErrInvalidAPIKey       = errors.New("invalid api key")
+	ErrGatewayUnavailable  = errors.New("gateway unavailable")
+	ErrAPIKeyEventDelivery = errors.New("failed to deliver api key event to gateway")
+	ErrAPIKeyHashingFailed = errors.New("failed to hash api key")
 )

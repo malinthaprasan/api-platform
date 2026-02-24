@@ -24,17 +24,13 @@ For end-user documentation, see [docs/gateway/](../docs/gateway/).
 ### Build
 
 ```bash
-# Build all components (recommended for local development)
-make build-local
+# Build all components
+make build
 
 # Build individual components
-make build-local-controller
-make build-local-policy-engine
-make build-local-router
-make build-local-gateway-builder
-
-# Multi-architecture builds using buildx
-make build
+make build-controller
+make build-gateway-runtime
+make build-gateway-builder
 ```
 
 ### Run
@@ -76,19 +72,18 @@ Environment variables use `APIP_GW_` prefix:
 
 | Variable | Description |
 |----------|-------------|
-| `APIP_GW_GATEWAY__CONTROLLER_STORAGE_TYPE` | `sqlite` or `memory` |
-| `APIP_GW_GATEWAY__CONTROLLER_STORAGE_SQLITE_PATH` | Path to SQLite database |
-| `APIP_GW_GATEWAY__CONTROLLER_LOGGING_LEVEL` | `debug`, `info`, `warn`, `error` |
+| `APIP_GW_CONTROLLER_STORAGE_TYPE` | `sqlite` or `memory` |
+| `APIP_GW_CONTROLLER_STORAGE_SQLITE_PATH` | Path to SQLite database |
+| `APIP_GW_CONTROLLER_LOGGING_LEVEL` | `debug`, `info`, `warn`, `error` |
 | `APIP_GW_POLICY__ENGINE_METRICS_PORT` | Policy engine metrics port |
 
 See [gateway-controller/README.md](gateway-controller/README.md) for full configuration options.
 
-### Router
+### Gateway Runtime
 
 | Variable | Description |
 |----------|-------------|
-| `XDS_SERVER_HOST` | Gateway-Controller hostname |
-| `XDS_SERVER_PORT` | xDS port (default: 18000) |
+| `GATEWAY_CONTROLLER_HOST` | Gateway-Controller hostname (default: `gateway-controller`). The well-known xDS ports (18000 for Router, 18001 for Policy Engine) are derived automatically. |
 
 ## Component Documentation
 

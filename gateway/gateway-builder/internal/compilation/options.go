@@ -20,7 +20,9 @@ package compilation
 
 import (
 	"fmt"
+	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/wso2/api-platform/gateway/gateway-builder/pkg/types"
@@ -28,26 +30,58 @@ import (
 
 // BuildOptions creates compilation options for the policy engine binary
 func BuildOptions(outputPath string, buildMetadata *types.BuildMetadata) *types.CompilationOptions {
+	// Check for coverage mode from environment variable
+	enableCoverage := false
+	if coverageEnv := os.Getenv("COVERAGE"); strings.EqualFold(coverageEnv, "true") {
+		enableCoverage = true
+	}
+
+	// Check for debug mode from environment variable
+	enableDebug := false
+	if debugEnv := os.Getenv("DEBUG"); strings.EqualFold(debugEnv, "true") {
+		enableDebug = true
+	}
+
+	// Determine target architecture:
+	// 1. Use TARGETARCH env var if set (Docker buildx cross-compilation)
+	// 2. Fall back to runtime.GOARCH (native build)
+	targetArch := os.Getenv("TARGETARCH")
+	if targetArch == "" {
+		targetArch = runtime.GOARCH
+	}
+
 	// Generate ldflags for build metadata injection
-	ldflags := generateLDFlags(buildMetadata)
+	// Pass enableCoverage/enableDebug to avoid stripping debug info when needed
+	ldflags := generateLDFlags(buildMetadata, enableCoverage, enableDebug)
 
 	return &types.CompilationOptions{
-		OutputPath: outputPath,
-		EnableUPX:  false, // Disabled by default for compatibility
-		LDFlags:    ldflags,
-		BuildTags:  []string{},
-		CGOEnabled: false, // Static binary
-		TargetOS:   "linux",
-		TargetArch: runtime.GOARCH, // Use native architecture
+		OutputPath:     outputPath,
+		LDFlags:        ldflags,
+		BuildTags:      []string{},
+		CGOEnabled:     false, // Static binary
+		TargetOS:       "linux",
+		TargetArch:     targetArch,
+		EnableCoverage: enableCoverage,
+		EnableDebug:    enableDebug,
 	}
 }
 
 // generateLDFlags creates ldflags string for embedding build metadata
-func generateLDFlags(metadata *types.BuildMetadata) string {
-	ldflags := "-s -w" // Strip debug info and symbol table
+// enableCoverage/enableDebug determine if debug info should be preserved
+func generateLDFlags(metadata *types.BuildMetadata, enableCoverage bool, enableDebug bool) string {
+	var ldflags string
+
+	// Only strip debug info if neither coverage nor debug mode is enabled
+	// -s and -w interfere with Go coverage instrumentation and dlv debugging
+	if !enableCoverage && !enableDebug {
+		ldflags = "-s -w" // Strip debug info and symbol table
+	}
 
 	// Add version information (matching policy-engine main.go variables)
-	ldflags += fmt.Sprintf(" -X main.Version=%s", metadata.Version)
+	if ldflags != "" {
+		ldflags += " "
+	}
+	ldflags += fmt.Sprintf("-X main.Version=%s", metadata.Version)
 	ldflags += fmt.Sprintf(" -X main.GitCommit=%s", metadata.GitCommit)
 
 	// Add build timestamp as BuildDate

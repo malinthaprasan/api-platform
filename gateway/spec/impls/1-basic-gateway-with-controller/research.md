@@ -229,7 +229,7 @@ This document consolidates research findings for key technical decisions require
 
 **Key Findings**:
 - **Gateway-Controller**:
-  - Stage 1: Use `golang:1.25.1` to build binary
+  - Stage 1: Use `golang:1.25.7` to build binary
   - Stage 2: Use `alpine:latest` or `scratch` for runtime
   - Result: Final image <20MB (compared to 1GB+ with full Go image)
 
@@ -596,7 +596,7 @@ func main() {
 
 **Implementation Notes**:
 
-1. **Bootstrap Configuration** (`gateway/router/config/envoy-bootstrap.yaml`):
+1. **Bootstrap Configuration** (`gateway/gateway-runtime/router/config/envoy-bootstrap.yaml`):
    - Access logs configured under static resources (not dynamic xDS)
    - Applied to all dynamically configured listeners via HTTP Connection Manager defaults
 

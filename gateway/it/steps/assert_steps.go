@@ -51,6 +51,7 @@ func NewAssertSteps(provider ResponseProvider) *AssertSteps {
 func (a *AssertSteps) Register(ctx *godog.ScenarioContext) {
 	// Status code assertions
 	ctx.Step(`^the response status code should be (\d+)$`, a.statusCodeShouldBe)
+	ctx.Step(`^the response status should be (\d+)$`, a.statusCodeShouldBe) // Alias
 	ctx.Step(`^the response status should be "([^"]*)"$`, a.statusShouldBe)
 	ctx.Step(`^the response should be successful$`, a.responseShouldBeSuccessful)
 	ctx.Step(`^the response should be a client error$`, a.responseShouldBeClientError)
@@ -79,6 +80,19 @@ func (a *AssertSteps) Register(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the JSON response field "([^"]*)" should be (\d+)$`, a.jsonFieldShouldBeInt)
 	ctx.Step(`^the JSON response field "([^"]*)" should be (true|false)$`, a.jsonFieldShouldBeBool)
 	ctx.Step(`^the JSON response should have (\d+) items$`, a.jsonShouldHaveItems)
+
+	// Echoed header assertions (for sample-backend /echo endpoint)
+	ctx.Step(`^the response should contain echoed header "([^"]*)" with value "([^"]*)"$`, a.echoedHeaderShouldBe)
+
+	// Debug helper
+	ctx.Step(`^I print the response body$`, a.printResponseBody)
+	ctx.Step(`^the response should not contain echoed header "([^"]*)"$`, a.echoedHeaderShouldNotExist)
+	ctx.Step(`^the response should contain echoed header "([^"]*)" containing "([^"]*)"$`, a.echoedHeaderShouldContain)
+
+	// Response header assertions (alternative to existing headerShouldBe)
+	ctx.Step(`^the response should have header "([^"]*)" with value "([^"]*)"$`, a.headerShouldBe)
+	ctx.Step(`^the response should not have header "([^"]*)"$`, a.headerShouldNotExist)
+	ctx.Step(`^the response should have header "([^"]*)" containing "([^"]*)"$`, a.headerShouldContain)
 }
 
 // statusCodeShouldBe asserts the response status code
@@ -418,4 +432,146 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+// extractEchoedHeaders extracts headers from response body, supporting multiple backend formats
+func extractEchoedHeaders(data map[string]interface{}) (map[string]interface{}, error) {
+	// Try sample-backend format: Request.Header
+	if request, ok := data["Request"].(map[string]interface{}); ok {
+		if header, ok := request["Header"].(map[string]interface{}); ok {
+			return header, nil
+		}
+	}
+
+	// Try top-level headers field (for other backends like httpbin)
+	if headers, ok := data["headers"].(map[string]interface{}); ok {
+		return headers, nil
+	}
+
+	return nil, fmt.Errorf("response does not contain headers field or is not a map")
+}
+
+// echoedHeaderShouldBe asserts an echoed header value from sample-backend JSON response
+// Sample-backend returns headers in the JSON response under the "headers" field
+func (a *AssertSteps) echoedHeaderShouldBe(headerName, expected string) error {
+	body := a.provider.LastBody()
+	var data map[string]interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return fmt.Errorf("failed to parse JSON response: %w", err)
+	}
+
+	headers, err := extractEchoedHeaders(data)
+	if err != nil {
+		return err
+	}
+
+	// Headers are case-insensitive, normalize to lowercase
+	normalizedName := strings.ToLower(headerName)
+	var actualValue interface{}
+	var found bool
+
+	// Find header with case-insensitive matching
+	for key, value := range headers {
+		if strings.ToLower(key) == normalizedName {
+			actualValue = value
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("expected echoed header %q to exist in response", headerName)
+	}
+
+	// Handle both string and array values
+	switch v := actualValue.(type) {
+	case string:
+		if v != expected {
+			return fmt.Errorf("expected echoed header %q to be %q, got %q", headerName, expected, v)
+		}
+	case []interface{}:
+		if len(v) == 0 {
+			return fmt.Errorf("expected echoed header %q to be %q, got empty array", headerName, expected)
+		}
+		firstVal := fmt.Sprintf("%v", v[0])
+		if firstVal != expected {
+			return fmt.Errorf("expected echoed header %q to be %q, got %q", headerName, expected, firstVal)
+		}
+	default:
+		return fmt.Errorf("expected echoed header %q to be string or array, got %T", headerName, actualValue)
+	}
+
+	return nil
+}
+
+// echoedHeaderShouldNotExist asserts an echoed header does not exist
+func (a *AssertSteps) echoedHeaderShouldNotExist(headerName string) error {
+	body := a.provider.LastBody()
+	var data map[string]interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return fmt.Errorf("failed to parse JSON response: %w", err)
+	}
+
+	headers, err := extractEchoedHeaders(data)
+	if err != nil {
+		// No headers field means header doesn't exist
+		return nil
+	}
+
+	normalizedName := strings.ToLower(headerName)
+
+	for key := range headers {
+		if strings.ToLower(key) == normalizedName {
+			return fmt.Errorf("expected echoed header %q to not exist, but it does", headerName)
+		}
+	}
+
+	return nil
+}
+
+// echoedHeaderShouldContain asserts an echoed header contains a value
+func (a *AssertSteps) echoedHeaderShouldContain(headerName, expected string) error {
+	body := a.provider.LastBody()
+	var data map[string]interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return fmt.Errorf("failed to parse JSON response: %w", err)
+	}
+
+	headers, err := extractEchoedHeaders(data)
+	if err != nil {
+		return err
+	}
+
+	normalizedName := strings.ToLower(headerName)
+	var actualValue interface{}
+	var found bool
+
+	for key, value := range headers {
+		if strings.ToLower(key) == normalizedName {
+			actualValue = value
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("expected echoed header %q to exist in response", headerName)
+	}
+
+	actualStr := fmt.Sprintf("%v", actualValue)
+	if !strings.Contains(actualStr, expected) {
+		return fmt.Errorf("expected echoed header %q to contain %q, got %q", headerName, expected, actualStr)
+	}
+
+	return nil
+}
+
+// printResponseBody prints the response body for debugging
+func (a *AssertSteps) printResponseBody() error {
+	body := string(a.provider.LastBody())
+	fmt.Printf("\n═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("DEBUG: Response Status: %d\n", a.provider.LastResponse().StatusCode)
+	fmt.Printf("DEBUG: Response Body:\n%s\n", body)
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n\n")
+	return nil
 }

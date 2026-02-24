@@ -119,6 +119,120 @@ func (s *APIUtilsService) FetchAPIDefinition(apiID string) ([]byte, error) {
 	return bodyBytes, nil
 }
 
+// FetchLLMProviderDefinition downloads the LLM provider definition as a zip file from the control plane
+func (s *APIUtilsService) FetchLLMProviderDefinition(providerID string) ([]byte, error) {
+	// Construct the LLM provider URL by appending the resource path
+	providerURL := s.config.BaseURL + "/llm-providers/" + providerID
+
+	s.logger.Info("Fetching LLM provider definition",
+		slog.String("provider_id", providerID),
+		slog.String("url", providerURL),
+	)
+
+	// Create HTTP client with TLS configuration
+	client := &http.Client{
+		Timeout: s.config.Timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: s.config.InsecureSkipVerify,
+			},
+		},
+	}
+
+	// Create request
+	req, err := http.NewRequest("GET", providerURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add authentication header
+	req.Header.Add("api-key", s.config.Token)
+	req.Header.Add("Accept", "application/zip")
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch LLM provider definition: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("LLM provider request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Read response body
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	s.logger.Info("Successfully fetched LLM provider definition",
+		slog.String("provider_id", providerID),
+		slog.Int("size_bytes", len(bodyBytes)),
+	)
+
+	return bodyBytes, nil
+}
+
+// FetchLLMProxyDefinition downloads the LLM proxy definition as a zip file from the control plane
+func (s *APIUtilsService) FetchLLMProxyDefinition(proxyID string) ([]byte, error) {
+	// Construct the LLM proxy URL by appending the resource path
+	proxyURL := s.config.BaseURL + "/llm-proxies/" + proxyID
+
+	s.logger.Info("Fetching LLM proxy definition",
+		slog.String("proxy_id", proxyID),
+		slog.String("url", proxyURL),
+	)
+
+	// Create HTTP client with TLS configuration
+	client := &http.Client{
+		Timeout: s.config.Timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: s.config.InsecureSkipVerify,
+			},
+		},
+	}
+
+	// Create request
+	req, err := http.NewRequest("GET", proxyURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add authentication header
+	req.Header.Add("api-key", s.config.Token)
+	req.Header.Add("Accept", "application/zip")
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch LLM proxy definition: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("LLM proxy request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Read response body
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	s.logger.Info("Successfully fetched LLM proxy definition",
+		slog.String("proxy_id", proxyID),
+		slog.Int("size_bytes", len(bodyBytes)),
+	)
+
+	return bodyBytes, nil
+}
+
 // ExtractYAMLFromZip extracts the API definition YAML from the zip file
 func (s *APIUtilsService) ExtractYAMLFromZip(zipData []byte) ([]byte, error) {
 	// Create a reader from the zip data
@@ -157,9 +271,9 @@ func (s *APIUtilsService) ExtractYAMLFromZip(zipData []byte) ([]byte, error) {
 
 // CreateAPIFromYAML creates an API configuration from YAML data using the deployment service
 func (s *APIUtilsService) CreateAPIFromYAML(yamlData []byte, apiID string, correlationID string,
-	deploymentService *APIDeploymentService) error {
+	deploymentService *APIDeploymentService) (*APIDeploymentResult, error) {
 	// Use the deployment service to handle the API configuration deployment
-	_, err := deploymentService.DeployAPIConfiguration(APIDeploymentParams{
+	result, err := deploymentService.DeployAPIConfiguration(APIDeploymentParams{
 		Data:          yamlData,
 		ContentType:   "application/yaml",
 		APIID:         apiID, // Use the API ID from the deployment event
@@ -168,10 +282,48 @@ func (s *APIUtilsService) CreateAPIFromYAML(yamlData []byte, apiID string, corre
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to deploy API configuration from YAML: %w", err)
+		return nil, fmt.Errorf("failed to deploy API configuration from YAML: %w", err)
 	}
 
-	return nil
+	return result, nil
+}
+
+// CreateLLMProviderFromYAML creates an LLM provider configuration from YAML data using the LLM deployment service
+func (s *APIUtilsService) CreateLLMProviderFromYAML(yamlData []byte, providerID string, correlationID string,
+	llmDeploymentService *LLMDeploymentService) (*APIDeploymentResult, error) {
+	// Use the LLM deployment service to handle the provider configuration deployment
+	result, err := llmDeploymentService.DeployLLMProviderConfiguration(LLMDeploymentParams{
+		Data:          yamlData,
+		ContentType:   "application/yaml",
+		ID:            providerID,
+		CorrelationID: correlationID,
+		Logger:        s.logger,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to deploy LLM provider configuration from YAML: %w", err)
+	}
+
+	return result, nil
+}
+
+// CreateLLMProxyFromYAML creates an LLM proxy configuration from YAML data using the LLM deployment service
+func (s *APIUtilsService) CreateLLMProxyFromYAML(yamlData []byte, proxyID string, correlationID string,
+	llmDeploymentService *LLMDeploymentService) (*APIDeploymentResult, error) {
+	// Use the LLM deployment service to handle the proxy configuration deployment
+	result, err := llmDeploymentService.DeployLLMProxyConfiguration(LLMDeploymentParams{
+		Data:          yamlData,
+		ContentType:   "application/yaml",
+		ID:            proxyID,
+		CorrelationID: correlationID,
+		Logger:        s.logger,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to deploy LLM proxy configuration from YAML: %w", err)
+	}
+
+	return result, nil
 }
 
 // SaveAPIDefinition saves the API definition zip file to disk
@@ -209,11 +361,11 @@ type APIDeploymentNotification struct {
 }
 
 // NotifyAPIDeployment sends a REST API call to platform-api when an API is deployed successfully
-func (s *APIUtilsService) NotifyAPIDeployment(apiID string, apiConfig *models.StoredConfig, revisionID string) error {
+func (s *APIUtilsService) NotifyAPIDeployment(apiID string, apiConfig *models.StoredConfig, deploymentID string) error {
 	// Construct the deployment URL
 	deployURL := s.config.BaseURL + "/apis/" + apiID + "/gateway-deployments"
-	if revisionID != "" {
-		deployURL += "?revisionId=" + revisionID
+	if deploymentID != "" {
+		deployURL += "?deploymentId=" + deploymentID
 	}
 
 	// Create request body
@@ -257,7 +409,7 @@ func (s *APIUtilsService) NotifyAPIDeployment(apiID string, apiConfig *models.St
 	s.logger.Info("Sending API deployment notification to platform-api",
 		slog.String("api_id", apiID),
 		slog.String("url", deployURL),
-		slog.String("revision_id", revisionID))
+		slog.String("deployment_id", deploymentID))
 
 	// Make the request
 	resp, err := client.Do(req)

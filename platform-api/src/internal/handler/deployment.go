@@ -19,25 +19,28 @@ package handler
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 
+	"platform-api/src/api"
 	"platform-api/src/internal/constants"
-	"platform-api/src/internal/dto"
 	"platform-api/src/internal/middleware"
 	"platform-api/src/internal/service"
 	"platform-api/src/internal/utils"
 
 	"github.com/gin-gonic/gin"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 type DeploymentHandler struct {
 	deploymentService *service.DeploymentService
+	slogger           *slog.Logger
 }
 
-func NewDeploymentHandler(deploymentService *service.DeploymentService) *DeploymentHandler {
+func NewDeploymentHandler(deploymentService *service.DeploymentService, slogger *slog.Logger) *DeploymentHandler {
 	return &DeploymentHandler{
 		deploymentService: deploymentService,
+		slogger:           slogger,
 	}
 }
 
@@ -58,19 +61,24 @@ func (h *DeploymentHandler) DeployAPI(c *gin.Context) {
 		return
 	}
 
-	var req dto.DeployAPIRequest
+	var req api.DeployRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
 		return
 	}
 
 	// Validate required fields
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+			"name is required"))
+		return
+	}
 	if req.Base == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"base is required (use 'current' or a deploymentId)"))
 		return
 	}
-	if req.GatewayID == "" {
+	if req.GatewayId == (openapi_types.UUID{}) {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"gatewayId is required"))
 		return
@@ -93,65 +101,36 @@ func (h *DeploymentHandler) DeployAPI(c *gin.Context) {
 				"Base deployment not found"))
 			return
 		}
-		log.Printf("[ERROR] Failed to deploy API: apiId=%s error=%v", apiId, err)
+		if errors.Is(err, constants.ErrDeploymentNameRequired) {
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				"Deployment name is required"))
+			return
+		}
+		if errors.Is(err, constants.ErrDeploymentBaseRequired) {
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				"Base is required (use 'current' or a deploymentId)"))
+			return
+		}
+		if errors.Is(err, constants.ErrDeploymentGatewayIDRequired) {
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				"Gateway ID is required"))
+			return
+		}
+		if errors.Is(err, constants.ErrAPINoBackendServices) {
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				"API must have at least one backend service attached before deployment"))
+			return
+		}
+		h.slogger.Error("Failed to deploy API", "apiId", apiId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
-			err.Error()))
+			"Failed to deploy API"))
 		return
 	}
 
 	c.JSON(http.StatusCreated, deployment)
 }
 
-// RedeployDeployment handles POST /api/v1/apis/:apiId/deployments/:deploymentId/redeploy
-// Re-deploys an existing undeployed deployment artifact to its original gateway
-func (h *DeploymentHandler) RedeployDeployment(c *gin.Context) {
-	orgId, exists := middleware.GetOrganizationFromContext(c)
-	if !exists {
-		c.JSON(http.StatusUnauthorized, utils.NewErrorResponse(401, "Unauthorized",
-			"Organization claim not found in token"))
-		return
-	}
-
-	apiId := c.Param("apiId")
-	deploymentId := c.Param("deploymentId")
-
-	if apiId == "" {
-		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
-			"API ID is required"))
-		return
-	}
-	if deploymentId == "" {
-		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
-			"Deployment ID is required"))
-		return
-	}
-
-	deployment, err := h.deploymentService.RedeployDeploymentByHandle(apiId, deploymentId, orgId)
-	if err != nil {
-		if errors.Is(err, constants.ErrAPINotFound) {
-			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
-				"API not found"))
-			return
-		}
-		if errors.Is(err, constants.ErrDeploymentNotFound) {
-			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
-				"Deployment not found"))
-			return
-		}
-		if errors.Is(err, constants.ErrDeploymentAlreadyActive) {
-			c.JSON(http.StatusConflict, utils.NewErrorResponse(409, "Conflict",
-				"Deployment is already active"))
-			return
-		}
-		log.Printf("[ERROR] Failed to redeploy: apiId=%s deploymentId=%s error=%v", apiId, deploymentId, err)
-		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error", err.Error()))
-		return
-	}
-
-	c.JSON(http.StatusOK, deployment)
-}
-
-// UndeployDeployment handles POST /api/v1/apis/:apiId/deployments/:deploymentId/undeploy
+// UndeployDeployment handles POST /api/v1/apis/:apiId/deployments/undeploy
 // Undeploys an active deployment by changing its status to UNDEPLOYED
 func (h *DeploymentHandler) UndeployDeployment(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
@@ -162,20 +141,26 @@ func (h *DeploymentHandler) UndeployDeployment(c *gin.Context) {
 	}
 
 	apiId := c.Param("apiId")
-	deploymentId := c.Param("deploymentId")
+	var params api.UndeployDeploymentParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
+		return
+	}
+
+	deploymentId := params.DeploymentId
+	gatewayId := params.GatewayId
+	if deploymentId == "00000000-0000-0000-0000-000000000000" || gatewayId == "00000000-0000-0000-0000-000000000000" {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+			"deploymentId/gatewayId cannot be zero-value UUID"))
+		return
+	}
 
 	if apiId == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"API ID is required"))
 		return
 	}
-	if deploymentId == "" {
-		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
-			"Deployment ID is required"))
-		return
-	}
-
-	deployment, err := h.deploymentService.UndeployDeploymentByHandle(apiId, deploymentId, orgId)
+	deployment, err := h.deploymentService.UndeployDeploymentByHandle(apiId, deploymentId, gatewayId, orgId)
 	if err != nil {
 		if errors.Is(err, constants.ErrAPINotFound) {
 			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
@@ -187,13 +172,88 @@ func (h *DeploymentHandler) UndeployDeployment(c *gin.Context) {
 				"Deployment not found"))
 			return
 		}
+		if errors.Is(err, constants.ErrGatewayNotFound) {
+			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
+				"Gateway not found"))
+			return
+		}
 		if errors.Is(err, constants.ErrDeploymentNotActive) {
 			c.JSON(http.StatusConflict, utils.NewErrorResponse(409, "Conflict",
 				"No active deployment found for this API on the gateway"))
 			return
 		}
-		log.Printf("[ERROR] Failed to undeploy: apiId=%s deploymentId=%s error=%v", apiId, deploymentId, err)
-		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error", err.Error()))
+		if errors.Is(err, constants.ErrGatewayIDMismatch) {
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				"Deployment is bound to a different gateway"))
+			return
+		}
+		h.slogger.Error("Failed to undeploy", "apiId", apiId, "deploymentId", deploymentId, "gatewayId", gatewayId, "error", err)
+		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error", "Failed to undeploy deployment"))
+		return
+	}
+
+	c.JSON(http.StatusOK, deployment)
+}
+
+// RestoreDeployment handles POST /api/v1/apis/:apiId/deployments/restore
+// Restores a previous deployment (ARCHIVED or UNDEPLOYED)
+func (h *DeploymentHandler) RestoreDeployment(c *gin.Context) {
+	orgId, exists := middleware.GetOrganizationFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, utils.NewErrorResponse(401, "Unauthorized",
+			"Organization claim not found in token"))
+		return
+	}
+
+	apiId := c.Param("apiId")
+	var params api.RestoreDeploymentParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
+		return
+	}
+
+	deploymentId := params.DeploymentId
+	gatewayId := params.GatewayId
+	if deploymentId == "00000000-0000-0000-0000-000000000000" || gatewayId == "00000000-0000-0000-0000-000000000000" {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+			"deploymentId/gatewayId cannot be zero-value UUID"))
+		return
+	}
+
+	if apiId == "" {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+			"API ID is required"))
+		return
+	}
+	deployment, err := h.deploymentService.RestoreDeploymentByHandle(apiId, deploymentId, gatewayId, orgId)
+	if err != nil {
+		if errors.Is(err, constants.ErrAPINotFound) {
+			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
+				"API not found"))
+			return
+		}
+		if errors.Is(err, constants.ErrDeploymentNotFound) {
+			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
+				"Deployment not found"))
+			return
+		}
+		if errors.Is(err, constants.ErrGatewayNotFound) {
+			c.JSON(http.StatusNotFound, utils.NewErrorResponse(404, "Not Found",
+				"Gateway not found"))
+			return
+		}
+		if errors.Is(err, constants.ErrDeploymentAlreadyDeployed) {
+			c.JSON(http.StatusConflict, utils.NewErrorResponse(409, "Conflict",
+				"Cannot restore currently deployed deployment"))
+			return
+		}
+		if errors.Is(err, constants.ErrGatewayIDMismatch) {
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				"Deployment is bound to a different gateway"))
+			return
+		}
+		h.slogger.Error("Failed to restore deployment", "apiId", apiId, "deploymentId", deploymentId, "gatewayId", gatewayId, "error", err)
+		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error", "Failed to restore deployment"))
 		return
 	}
 
@@ -241,8 +301,8 @@ func (h *DeploymentHandler) DeleteDeployment(c *gin.Context) {
 				"Cannot delete an active deployment - undeploy it first"))
 			return
 		}
-		log.Printf("[ERROR] Failed to delete deployment: apiId=%s deploymentId=%s error=%v", apiId, deploymentId, err)
-		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error", err.Error()))
+		h.slogger.Error("Failed to delete deployment", "apiId", apiId, "deploymentId", deploymentId, "error", err)
+		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error", "Failed to delete deployment"))
 		return
 	}
 
@@ -285,7 +345,7 @@ func (h *DeploymentHandler) GetDeployment(c *gin.Context) {
 				"Deployment not found"))
 			return
 		}
-		log.Printf("[ERROR] Failed to get deployment: apiId=%s deploymentId=%s error=%v", apiId, deploymentId, err)
+		h.slogger.Error("Failed to get deployment", "apiId", apiId, "deploymentId", deploymentId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to retrieve deployment"))
 		return
@@ -311,9 +371,19 @@ func (h *DeploymentHandler) GetDeployments(c *gin.Context) {
 		return
 	}
 
-	// Get optional query parameters
-	gatewayId := c.Query("gatewayId")
-	status := c.Query("status")
+	var params api.GetDeploymentsParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
+		return
+	}
+
+	var gatewayId, status string
+	if params.GatewayId != nil {
+		gatewayId = string(*params.GatewayId)
+	}
+	if params.Status != nil {
+		status = string(*params.Status)
+	}
 
 	deployments, err := h.deploymentService.GetDeploymentsByHandle(apiId, gatewayId, status, orgId)
 	if err != nil {
@@ -327,7 +397,7 @@ func (h *DeploymentHandler) GetDeployments(c *gin.Context) {
 				"Invalid deployment status"))
 			return
 		}
-		log.Printf("[ERROR] Failed to get deployments: apiId=%s error=%v", apiId, err)
+		h.slogger.Error("Failed to get deployments", "apiId", apiId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to retrieve deployments"))
 		return
@@ -338,13 +408,14 @@ func (h *DeploymentHandler) GetDeployments(c *gin.Context) {
 
 // RegisterRoutes registers all deployment-related routes
 func (h *DeploymentHandler) RegisterRoutes(r *gin.Engine) {
-	apiGroup := r.Group("/api/v1/apis/:apiId")
+	h.slogger.Debug("Registering deployment routes")
+	apiGroup := r.Group("/api/v1/rest-apis/:apiId")
 	{
-		apiGroup.POST("/deploy", h.DeployAPI)
+		apiGroup.POST("/deployments", h.DeployAPI)
+		apiGroup.POST("/deployments/undeploy", h.UndeployDeployment)
+		apiGroup.POST("/deployments/restore", h.RestoreDeployment)
 		apiGroup.GET("/deployments", h.GetDeployments)
 		apiGroup.GET("/deployments/:deploymentId", h.GetDeployment)
-		apiGroup.POST("/deployments/:deploymentId/redeploy", h.RedeployDeployment)
-		apiGroup.POST("/deployments/:deploymentId/undeploy", h.UndeployDeployment)
 		apiGroup.DELETE("/deployments/:deploymentId", h.DeleteDeployment)
 	}
 }

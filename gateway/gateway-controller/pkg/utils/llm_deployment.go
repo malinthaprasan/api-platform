@@ -56,6 +56,7 @@ type LLMDeploymentService struct {
 	deploymentService   *APIDeploymentService
 	parser              *config.Parser
 	validator           *config.LLMValidator
+	policyValidator     *config.PolicyValidator
 	transformer         Transformer
 	routerConfig        *config.RouterConfig
 }
@@ -65,7 +66,11 @@ func NewLLMDeploymentService(store *storage.ConfigStore, db storage.Storage,
 	snapshotManager *xds.SnapshotManager,
 	lazyResourceManager *lazyresourcexds.LazyResourceStateManager,
 	templateDefinitions map[string]*api.LLMProviderTemplate,
-	deploymentService *APIDeploymentService, routerConfig *config.RouterConfig) *LLMDeploymentService {
+	deploymentService *APIDeploymentService,
+	routerConfig *config.RouterConfig,
+	policyVersionResolver PolicyVersionResolver,
+	policyValidator *config.PolicyValidator,
+) *LLMDeploymentService {
 	service := &LLMDeploymentService{
 		store:               store,
 		db:                  db,
@@ -75,7 +80,8 @@ func NewLLMDeploymentService(store *storage.ConfigStore, db storage.Storage,
 		deploymentService:   deploymentService,
 		parser:              config.NewParser(),
 		validator:           config.NewLLMValidator(),
-		transformer:         NewLLMProviderTransformer(store, routerConfig),
+		policyValidator:     policyValidator,
+		transformer:         NewLLMProviderTransformer(store, routerConfig, policyVersionResolver),
 	}
 
 	// Initialize OOB templates
@@ -115,6 +121,21 @@ func (s *LLMDeploymentService) DeployLLMProviderConfiguration(params LLMDeployme
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform LLM provider to API configuration: %w", err)
 	}
+
+	// Validate policies against loaded policy definitions
+	// if s.policyValidator != nil {
+	// 	policyErrors := s.policyValidator.ValidatePolicies(&apiConfig)
+	// 	if len(policyErrors) > 0 {
+	// 		errs := make([]string, 0, len(policyErrors))
+	// 		for i, e := range policyErrors {
+	// 			if params.Logger != nil {
+	// 				params.Logger.Warn("Policy validation error", slog.String("field", e.Field), slog.String("message", e.Message))
+	// 			}
+	// 			errs = append(errs, fmt.Sprintf("%d. %s: %s", i+1, e.Field, e.Message))
+	// 		}
+	// 		return nil, fmt.Errorf("policy validation failed with %d error(s): %s", len(policyErrors), strings.Join(errs, "; "))
+	// 	}
+	// }
 
 	// Generate API ID if not provided
 	apiID := params.ID
@@ -217,6 +238,21 @@ func (s *LLMDeploymentService) DeployLLMProxyConfiguration(params LLMDeploymentP
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform LLM proxy to API configuration: %w", err)
 	}
+
+	// Validate policies against loaded policy definitions
+	// if s.policyValidator != nil {
+	// 	policyErrors := s.policyValidator.ValidatePolicies(&apiConfig)
+	// 	if len(policyErrors) > 0 {
+	// 		errs := make([]string, 0, len(policyErrors))
+	// 		for i, e := range policyErrors {
+	// 			if params.Logger != nil {
+	// 				params.Logger.Warn("Policy validation error", slog.String("field", e.Field), slog.String("message", e.Message))
+	// 			}
+	// 			errs = append(errs, fmt.Sprintf("%d. %s: %s", i+1, e.Field, e.Message))
+	// 		}
+	// 		return nil, fmt.Errorf("policy validation failed with %d error(s): %s", len(policyErrors), strings.Join(errs, "; "))
+	// 	}
+	// }
 
 	// Generate API ID if not provided
 	apiID := params.ID
@@ -321,13 +357,11 @@ func (s *LLMDeploymentService) CreateLLMProviderTemplate(params LLMTemplateParam
 
 	// Persist to DB if available
 	if s.db != nil {
-		if sqlite, ok := s.db.(*storage.SQLiteStorage); ok {
-			if err := sqlite.SaveLLMProviderTemplate(stored); err != nil {
-				if storage.IsConflictError(err) || strings.Contains(err.Error(), "already exists") {
-					return nil, fmt.Errorf("template with handle '%s' already exists", tmpl.Metadata.Name)
-				}
-				return nil, fmt.Errorf("failed to save template to database: %w", err)
+		if err := s.db.SaveLLMProviderTemplate(stored); err != nil {
+			if storage.IsConflictError(err) || strings.Contains(err.Error(), "already exists") {
+				return nil, fmt.Errorf("template with handle '%s' already exists", tmpl.Metadata.Name)
 			}
+			return nil, fmt.Errorf("failed to save template to database: %w", err)
 		}
 	}
 
@@ -335,13 +369,11 @@ func (s *LLMDeploymentService) CreateLLMProviderTemplate(params LLMTemplateParam
 	if err := s.store.AddTemplate(stored); err != nil {
 		// Rollback: Remove from DB if memory store fails
 		if s.db != nil {
-			if sqlite, ok := s.db.(*storage.SQLiteStorage); ok {
-				if delErr := sqlite.DeleteLLMProviderTemplate(stored.ID); delErr != nil {
-					if params.Logger != nil {
-						params.Logger.Error("Failed to rollback template from database after memory store failure",
-							slog.String("template_handle", tmpl.Metadata.Name),
-							slog.Any("rollback_error", delErr))
-					}
+			if delErr := s.db.DeleteLLMProviderTemplate(stored.ID); delErr != nil {
+				if params.Logger != nil {
+					params.Logger.Error("Failed to rollback template from database after memory store failure",
+						slog.String("template_handle", tmpl.Metadata.Name),
+						slog.Any("rollback_error", delErr))
 				}
 			}
 		}
@@ -360,13 +392,11 @@ func (s *LLMDeploymentService) CreateLLMProviderTemplate(params LLMTemplateParam
 			}
 		}
 		if s.db != nil {
-			if sqlite, ok := s.db.(*storage.SQLiteStorage); ok {
-				if delErr := sqlite.DeleteLLMProviderTemplate(stored.ID); delErr != nil {
-					if params.Logger != nil {
-						params.Logger.Error("Failed to rollback template from database after xDS failure",
-							slog.String("template_handle", tmpl.Metadata.Name),
-							slog.Any("rollback_error", delErr))
-					}
+			if delErr := s.db.DeleteLLMProviderTemplate(stored.ID); delErr != nil {
+				if params.Logger != nil {
+					params.Logger.Error("Failed to rollback template from database after xDS failure",
+						slog.String("template_handle", tmpl.Metadata.Name),
+						slog.Any("rollback_error", delErr))
 				}
 			}
 		}
@@ -460,15 +490,13 @@ func (s *LLMDeploymentService) InitializeOOBTemplates(templateDefinitions map[st
 
 		// persist to DB if available
 		if s.db != nil {
-			if sqlite, ok := s.db.(*storage.SQLiteStorage); ok {
-				if err := sqlite.SaveLLMProviderTemplate(stored); err != nil {
-					if storage.IsConflictError(err) || strings.Contains(err.Error(), "already exists") {
-						continue
-					}
-					allErrors = append(allErrors, fmt.Sprintf("failed to save template '%s' to database: %v",
-						tmpl.Metadata.Name, err))
+			if err := s.db.SaveLLMProviderTemplate(stored); err != nil {
+				if storage.IsConflictError(err) || strings.Contains(err.Error(), "already exists") {
 					continue
 				}
+				allErrors = append(allErrors, fmt.Sprintf("failed to save template '%s' to database: %v",
+					tmpl.Metadata.Name, err))
+				continue
 			}
 		}
 
@@ -610,29 +638,27 @@ func (s *LLMDeploymentService) DeleteLLMProviderTemplate(handle string) (*models
 	}
 
 	if s.db != nil {
-		if sqlite, ok := s.db.(*storage.SQLiteStorage); ok {
-			if err := sqlite.DeleteLLMProviderTemplate(tmpl.ID); err != nil {
-				// Rollback: Re-add to lazy resource store if memory deletion fails
-				if s.lazyResourceManager != nil {
-					if rollbackErr := s.publishTemplateAsLazyResource(&tmpl.Configuration, ""); rollbackErr != nil {
-						slog.Error("Failed to rollback lazy resource after memory store deletion failure",
-							slog.String("template_handle", handle),
-							slog.Any("rollback_error", rollbackErr))
-					}
+		if err := s.db.DeleteLLMProviderTemplate(tmpl.ID); err != nil {
+			// Rollback: Re-add to lazy resource store if database deletion fails.
+			// publishTemplateAsLazyResource restores the template in lazy resources when
+			// s.db.DeleteLLMProviderTemplate fails (only if lazy resource manager is available).
+			if s.lazyResourceManager != nil {
+				if rollbackErr := s.publishTemplateAsLazyResource(&tmpl.Configuration, ""); rollbackErr != nil {
+					slog.Error("Failed to rollback lazy resource after database deletion failure",
+						slog.String("template_handle", handle),
+						slog.Any("rollback_error", rollbackErr))
 				}
-				return nil, fmt.Errorf("failed to delete template from database: %w", err)
 			}
+			return nil, fmt.Errorf("failed to delete template from database: %w", err)
 		}
 	}
 	if err := s.store.DeleteTemplate(tmpl.ID); err != nil {
 		// Rollback: Re-add to DB and lazy resource if memory deletion fails
 		if s.db != nil {
-			if sqlite, ok := s.db.(*storage.SQLiteStorage); ok {
-				if rollbackErr := sqlite.SaveLLMProviderTemplate(tmpl); rollbackErr != nil {
-					slog.Error("Failed to rollback template to database after memory store deletion failure",
-						slog.String("template_handle", handle),
-						slog.Any("rollback_error", rollbackErr))
-				}
+			if rollbackErr := s.db.SaveLLMProviderTemplate(tmpl); rollbackErr != nil {
+				slog.Error("Failed to rollback template to database after memory store deletion failure",
+					slog.String("template_handle", handle),
+					slog.Any("rollback_error", rollbackErr))
 			}
 		}
 		if s.lazyResourceManager != nil {

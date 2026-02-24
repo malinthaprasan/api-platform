@@ -17,7 +17,7 @@
 # --------------------------------------------------------------------
 
 # Gateway Builder Image
-FROM --platform=$BUILDPLATFORM golang:1.25.5-alpine3.23 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.7-bookworm AS builder
 ARG TARGETARCH
 
 # Build arguments for version information
@@ -25,32 +25,45 @@ ARG VERSION=0.0.1-SNAPSHOT
 ARG GIT_COMMIT=unknown
 
 # Install build dependencies
-RUN apk add --no-cache \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     git \
     make \
-    upx \
     ca-certificates
 
 # Set working directory
 WORKDIR /workspace
+
+# Copy common (needed for go.mod replace directive)
+COPY --from=common . /workspace/common
+
+# Pre-download Go dependencies for common
+WORKDIR /workspace/common
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy SDK (needed for go.mod replace directive)
 COPY --from=sdk . /workspace/sdk
 
 # Pre-download Go dependencies for SDK
 WORKDIR /workspace/sdk
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy Gateway Builder application (includes templates)
 COPY . /workspace/gateway/gateway-builder
 
 # Pre-download Go dependencies for runtime
 WORKDIR /workspace/gateway/gateway-builder
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Build the Gateway Builder binary with version information
 # Use explicit cross-compilation to avoid QEMU emulation issues
-RUN CGO_ENABLED=0 \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 \
     GOOS=linux \
     GOARCH=${TARGETARCH} \
     go build \
@@ -61,26 +74,31 @@ RUN CGO_ENABLED=0 \
     -o /usr/local/bin/gateway-builder \
     ./cmd/builder
 
-FROM golang:1.25.5-alpine3.23
+FROM golang:1.25.7-bookworm
 
 # Install runtime dependencies
-RUN apk add --no-cache \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     git \
     make \
-    upx \
     ca-certificates
 
 # Copy the compiled binary from builder stage
 COPY --from=builder /usr/local/bin/gateway-builder /usr/local/bin/gateway-builder
 
 # Copy Policy Engine framework source code
-COPY --from=policy-engine . /api-platform/gateway/policy-engine
+COPY --from=policy-engine . /api-platform/gateway/gateway-runtime/policy-engine
 COPY --from=system-policies . /api-platform/gateway/system-policies
+COPY --from=common . /api-platform/common
 COPY --from=sdk . /api-platform/sdk
 
 # Set working directory
 WORKDIR /workspace
 
-# Set entrypoint to builder binary
-ENTRYPOINT [ "/usr/local/bin/gateway-builder" ]
-CMD [ "-system-manifest-lock", "/api-platform/gateway/system-policies/system-policy-manifest-lock.yaml" ]
+# Set entrypoint to builder binary with system build lock
+ENTRYPOINT [ \
+    "/usr/local/bin/gateway-builder", \
+    "-system-build-lock", \
+    "/api-platform/gateway/system-policies/system-build-lock.yaml" \
+]

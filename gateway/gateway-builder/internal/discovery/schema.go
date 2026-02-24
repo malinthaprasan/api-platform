@@ -18,7 +18,13 @@
 
 package discovery
 
-import "log/slog"
+import (
+	"log/slog"
+
+	policyv1alpha "github.com/wso2/api-platform/sdk/gateway/policy/v1alpha"
+)
+
+const systemParamRequiredKey = "__wso2_internal_required"
 
 // ExtractDefaultValues extracts default values from a JSON schema structure.
 // It processes the "properties" object and extracts either "default" or "wso2/defaultValue"
@@ -37,19 +43,29 @@ import "log/slog"
 //	  }
 //	}
 //
-// Returns: map[string]interface{} with only the default values
+// Returns: map[string]interface{} with extracted values.
 //
-//	{"propName": "${config.Path.To.Config}"}
+// If wso2/defaultValue is present, a marker map is returned:
 //
-// TODO: (renuka) handle nested objects
+//	{
+//	  policyv1alpha.SystemParamConfigRefKey: "${config.Path.To.Config}",
+//	  systemParamRequiredKey: true|false,
+//	  policyv1alpha.SystemParamDefaultValueKey: "fallback-value" // only when schema default exists
+//	}
+//
+// Nested object properties are traversed recursively.
 func ExtractDefaultValues(schema map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
-
 	// Handle nil or empty schema
 	if schema == nil {
 		slog.Debug("Schema is nil, returning empty map", "phase", "discovery")
-		return result
+		return map[string]interface{}{}
 	}
+
+	return extractDefaultsFromSchema(schema)
+}
+
+func extractDefaultsFromSchema(schema map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
 
 	// Extract properties object
 	properties, ok := schema["properties"].(map[string]interface{})
@@ -62,6 +78,8 @@ func ExtractDefaultValues(schema map[string]interface{}) map[string]interface{} 
 		"propertyCount", len(properties),
 		"phase", "discovery")
 
+	requiredProperties := extractRequiredProperties(schema)
+
 	// Iterate through each property
 	for propName, propDef := range properties {
 		propDefMap, ok := propDef.(map[string]interface{})
@@ -72,22 +90,22 @@ func ExtractDefaultValues(schema map[string]interface{}) map[string]interface{} 
 			continue
 		}
 
-		// Check for wso2/defaultValue first (higher precedence)
-		if wso2Default, exists := propDefMap["wso2/defaultValue"]; exists {
-			result[propName] = wso2Default
-			slog.Debug("Extracted wso2/defaultValue",
+		if extractedValue, hasValue := extractPropertyValue(propDefMap, requiredProperties[propName]); hasValue {
+			result[propName] = extractedValue
+			slog.Debug("Extracted property value",
 				"property", propName,
-				"value", wso2Default,
+				"value", extractedValue,
 				"phase", "discovery")
 			continue
 		}
 
-		// Fallback to standard default
-		if defaultValue, exists := propDefMap["default"]; exists {
-			result[propName] = defaultValue
-			slog.Debug("Extracted default",
+		// No direct default values on this property, recurse if this is an object schema.
+		nested := extractDefaultsFromSchema(propDefMap)
+		if len(nested) > 0 {
+			result[propName] = nested
+			slog.Debug("Extracted nested defaults",
 				"property", propName,
-				"value", defaultValue,
+				"value", nested,
 				"phase", "discovery")
 		}
 	}
@@ -97,4 +115,56 @@ func ExtractDefaultValues(schema map[string]interface{}) map[string]interface{} 
 		"phase", "discovery")
 
 	return result
+}
+
+func extractRequiredProperties(schema map[string]interface{}) map[string]bool {
+	requiredProperties := map[string]bool{}
+
+	requiredRaw, ok := schema["required"]
+	if !ok {
+		return requiredProperties
+	}
+
+	switch required := requiredRaw.(type) {
+	case []interface{}:
+		for _, item := range required {
+			name, ok := item.(string)
+			if !ok || name == "" {
+				continue
+			}
+			requiredProperties[name] = true
+		}
+	case []string:
+		for _, name := range required {
+			if name == "" {
+				continue
+			}
+			requiredProperties[name] = true
+		}
+	}
+
+	return requiredProperties
+}
+
+func extractPropertyValue(propDefMap map[string]interface{}, required bool) (interface{}, bool) {
+	wso2Default, hasWso2Default := propDefMap["wso2/defaultValue"]
+	defaultValue, hasDefault := propDefMap["default"]
+
+	switch {
+	case hasWso2Default && hasDefault:
+		return map[string]interface{}{
+			policyv1alpha.SystemParamConfigRefKey:    wso2Default,
+			policyv1alpha.SystemParamDefaultValueKey: defaultValue,
+			systemParamRequiredKey:                   required,
+		}, true
+	case hasWso2Default:
+		return map[string]interface{}{
+			policyv1alpha.SystemParamConfigRefKey: wso2Default,
+			systemParamRequiredKey:                required,
+		}, true
+	case hasDefault:
+		return defaultValue, true
+	default:
+		return nil, false
+	}
 }
