@@ -1,0 +1,259 @@
+# Contract fragment for feature 001-openapi-spec-management.
+#
+# These paths and schemas are to be merged into
+# platform-api/resources/openapi.yaml. That file is the single source of truth:
+# oapi-codegen generates api/generated.go from it, and the ScopeRegistry
+# (internal/middleware/openapi_scope_registry.go) derives scope enforcement from
+# the security blocks below. This fragment is not loaded at runtime.
+
+paths:
+  /rest-apis/{restApiId}/openapi:
+    get:
+      summary: Get the OpenAPI specification of a REST API
+      description: |
+        Returns the OpenAPI specification stored against this REST API.
+
+        The response representation is chosen from the Accept header
+        (application/json or application/yaml); when Accept expresses no
+        preference the specification is returned in the representation it was
+        uploaded in. Responds 404 when the API has no specification attached —
+        distinguishable from an unknown API by the error code (FR-008).
+      operationId: GetRESTAPIOpenAPISpec
+      security:
+        - OAuth2Security:
+            - ap:rest_api:openapi:read
+            - ap:rest_api:openapi:manage
+            - ap:rest_api:manage
+      tags:
+        - REST APIs
+      parameters:
+        - $ref: '#/components/parameters/apiId'
+      responses:
+        '200':
+          description: Specification retrieved successfully
+          headers:
+            Last-Modified:
+              description: When the specification was last changed
+              schema:
+                type: string
+                format: date-time
+          content:
+            application/json:
+              schema:
+                type: object
+                description: The stored OpenAPI document
+                additionalProperties: true
+            application/yaml:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      summary: Create or replace the OpenAPI specification of a REST API
+      description: |
+        Stores the supplied OpenAPI document as this API's current
+        specification, replacing any existing one. Idempotent: exactly one
+        specification exists per API, so upload and update are the same
+        operation.
+
+        The document is validated before anything is written. On validation
+        failure the previously stored specification is left intact (FR-006).
+        External references in the document are never resolved and never
+        fetched (FR-011). Bodies above the configured maximum
+        (openapi_spec_max_bytes) are rejected with 413.
+
+        This operation never modifies the API's declared resources and never
+        changes how the API is routed (FR-013). Where the two disagree, see
+        GET /rest-apis/{restApiId}/openapi/drift.
+      operationId: PutRESTAPIOpenAPISpec
+      security:
+        - OAuth2Security:
+            - ap:rest_api:openapi:update
+            - ap:rest_api:openapi:manage
+            - ap:rest_api:manage
+      tags:
+        - REST APIs
+      parameters:
+        - $ref: '#/components/parameters/apiId'
+      requestBody:
+        required: true
+        description: The OpenAPI document, in JSON or YAML
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+          application/yaml:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: Specification stored successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RESTAPIOpenAPISpecMetadata'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: The document exceeds the maximum allowed size
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The document is not a valid OpenAPI specification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      summary: Remove the OpenAPI specification of a REST API
+      description: |
+        Removes the stored specification. The REST API itself, its declared
+        resources, and its routing are unaffected (FR-007, FR-013).
+      operationId: DeleteRESTAPIOpenAPISpec
+      security:
+        - OAuth2Security:
+            - ap:rest_api:openapi:delete
+            - ap:rest_api:openapi:manage
+            - ap:rest_api:manage
+      tags:
+        - REST APIs
+      parameters:
+        - $ref: '#/components/parameters/apiId'
+      responses:
+        '204':
+          description: Specification removed successfully
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rest-apis/{restApiId}/openapi/drift:
+    get:
+      summary: Report drift between the specification and the API's declared resources
+      description: |
+        Compares the operations declared in the stored specification against the
+        API's declared REST resources and reports the differences in both
+        directions (FR-014). Reporting only — neither side is modified.
+
+        Methods are compared case-insensitively and paths are compared with
+        templating parameter names normalized away, so /pets/{id} and
+        /pets/{petId} are the same route (FR-019).
+      operationId: GetRESTAPIOpenAPISpecDrift
+      security:
+        - OAuth2Security:
+            - ap:rest_api:openapi:read
+            - ap:rest_api:openapi:manage
+            - ap:rest_api:manage
+      tags:
+        - REST APIs
+      parameters:
+        - $ref: '#/components/parameters/apiId'
+      responses:
+        '200':
+          description: Drift report produced successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RESTAPIOpenAPISpecDrift'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  schemas:
+    RESTAPIOpenAPISpecMetadata:
+      type: object
+      description: Metadata about a stored specification. Never includes the document itself.
+      properties:
+        format:
+          type: string
+          enum: [JSON, YAML]
+          description: The representation the document was uploaded in
+        openApiVersion:
+          type: string
+          example: "3.0.3"
+        sizeBytes:
+          type: integer
+          format: int64
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+      required: [format, openApiVersion, sizeBytes, updatedAt]
+
+    RESTAPIOpenAPISpecDrift:
+      type: object
+      description: Differences between the stored specification and the API's declared resources.
+      properties:
+        inSync:
+          type: boolean
+          description: True when neither list below has entries
+        inSpecOnly:
+          type: array
+          description: Operations declared in the specification but not as API resources
+          items:
+            $ref: '#/components/schemas/RESTAPIOperationRef'
+        inResourcesOnly:
+          type: array
+          description: Operations declared as API resources but absent from the specification
+          items:
+            $ref: '#/components/schemas/RESTAPIOperationRef'
+      required: [inSync, inSpecOnly, inResourcesOnly]
+
+    RESTAPIOperationRef:
+      type: object
+      properties:
+        method:
+          type: string
+          example: GET
+          description: Always uppercase
+        path:
+          type: string
+          example: /pets/{id}
+      required: [method, path]
+
+    # Additive, response-only fields on the existing RESTAPI schema (FR-020, FR-012).
+    # Merge these two properties into components.schemas.RESTAPI; they must be
+    # readOnly and must never be accepted on create or update.
+    RESTAPI-additions:
+      type: object
+      properties:
+        hasOpenApiSpec:
+          type: boolean
+          readOnly: true
+          description: Whether this API has an OpenAPI specification attached
+        openApiSpecUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+          description: When the specification was last changed; null when none is attached
