@@ -58,6 +58,7 @@ The API producer changes their contract — adds an operation, corrects a schema
 1. **Given** an API with a stored specification, **When** the caller uploads a revised valid specification, **Then** the revised document replaces the previous one and subsequent retrievals return the revised content.
 2. **Given** an API with a stored specification, **When** the caller uploads a revised document that fails validation, **Then** the request is rejected and the previously stored specification remains intact and retrievable.
 3. **Given** an API with a stored specification, **When** the caller removes the specification, **Then** subsequent retrievals report that no specification exists, and the API itself remains unaffected.
+4. **Given** an API whose declared resources include a path the uploaded specification does not declare (or vice versa), **When** the specification is uploaded, **Then** the upload succeeds, the declared resources are left untouched, and the platform reports the differing paths and methods as drift.
 
 ---
 
@@ -72,7 +73,7 @@ An API producer publishes an API to the developer portal. The portal renders the
 **Acceptance Scenarios**:
 
 1. **Given** an API with a stored specification, **When** it is published to the developer portal, **Then** the portal presents documentation derived from that specification.
-2. **Given** an API with no stored specification, **When** a producer attempts to publish it to the developer portal, **Then** the platform clearly indicates that a specification is required (or presents the API using only its declared resources, per the platform's existing publishing behaviour) rather than failing opaquely.
+2. **Given** an API with no stored specification, **When** a producer publishes it to the developer portal, **Then** the portal presents the API using only its declared resources, as it does today, and the producer is told that attaching a specification would yield richer documentation.
 3. **Given** a published API whose specification is subsequently updated, **When** the update completes, **Then** the portal reflects the updated documentation without the API needing to be republished from scratch.
 
 ---
@@ -106,12 +107,12 @@ An API producer publishes an API to the developer portal. The portal renders the
 - **FR-010**: Specification read, upload/update, and removal MUST each be governed by an explicitly named permission consistent with the platform's existing REST API permission naming, so that read access can be granted without write access.
 - **FR-011**: The platform MUST NOT resolve external or remote references contained in an uploaded specification while validating or storing it; a document depending on unresolvable external references MUST either be rejected or stored with those references left unresolved, and MUST never cause the platform to issue an outbound request to a location named in the document.
 - **FR-012**: The platform MUST record, for each stored specification, when it was last changed and by whom, and MUST surface the last-changed time to callers who can read the specification.
-- **FR-013**: The relationship between a stored specification and the API's declared REST resources MUST be defined and applied consistently: [NEEDS CLARIFICATION: does uploading a specification become the source of truth for the API's resources/operations — replacing or synchronising them, and therefore changing gateway routing on the next deployment — or is the specification stored as an independent document used for documentation and portal publishing only, leaving the declared resources untouched?]
-- **FR-014**: The platform MUST define whether a REST API can be created directly from a specification: [NEEDS CLARIFICATION: should users be able to create a new REST API by importing an OpenAPI document (and/or by supplying a URL the platform fetches), or is this feature limited to attaching a specification to an API that already exists?]
-- **FR-015**: The stored specification MUST be available to the developer portal publishing flow so that a published API's documentation, operations, and schemas are derived from it.
-- **FR-016**: An update to a stored specification MUST be reflected to consumers of that specification (including a published portal listing) without requiring the API to be recreated.
-- **FR-017**: Concurrent uploads to the same API MUST resolve to exactly one complete stored document; a partially written or interleaved document MUST never be readable.
-- **FR-018**: Uploading, updating, or removing a specification MUST NOT silently change the routing of an already-deployed API; any effect on existing deployments MUST require the platform's normal deployment action to take effect.
+- **FR-013**: The stored specification MUST be kept independently of the API's declared REST resources. Uploading, updating, or removing a specification MUST NOT add, remove, or modify any declared resource, and MUST NOT change how the API is routed. The declared resources remain the sole source of truth for routing; the specification is the source of truth for documentation and portal publishing.
+- **FR-014**: Where a stored specification's declared operations disagree with the API's declared REST resources, the platform MUST surface that drift to callers who can read the API — identifying which paths and methods appear in only one of the two — without altering either side and without blocking the upload.
+- **FR-015**: The target REST API MUST already exist before a specification can be attached to it. Creating a REST API by importing a specification, and fetching a specification from a caller-supplied URL, are out of scope for this feature; the platform MUST NOT expose either capability.
+- **FR-016**: The stored specification MUST be available to the developer portal publishing flow so that a published API's documentation, operations, and schemas are derived from it.
+- **FR-017**: An update to a stored specification MUST be reflected to consumers of that specification (including a published portal listing) without requiring the API to be recreated.
+- **FR-018**: Concurrent uploads to the same API MUST resolve to exactly one complete stored document; a partially written or interleaved document MUST never be readable.
 - **FR-019**: HTTP methods and paths read from an uploaded specification MUST be normalized consistently (case for methods, redundant separators and escaped characters for paths) before any comparison, storage, or matching, so that equivalent documents produce equivalent results.
 - **FR-020**: The platform MUST make a specification's presence visible when listing or fetching an API, so a caller can tell which APIs have a specification without fetching each document.
 
@@ -132,11 +133,14 @@ An API producer publishes an API to the developer portal. The portal renders the
 - **SC-004**: 100% of documents that fail validation are rejected with the API's previously stored specification left unchanged and still retrievable.
 - **SC-005**: An API with an attached specification can be published to the developer portal and its documentation rendered from that specification, with no manual re-entry of operations or schemas.
 - **SC-006**: Zero cross-organization accesses succeed: no caller can read, replace, or remove a specification belonging to an API outside their own organization, verified by test coverage over every specification operation.
-- **SC-007**: Support requests and manual steps relating to "the portal listing doesn't match my API contract" are eliminated for APIs that have an attached specification, because the portal and the contract have a single shared source.
+- **SC-007**: Uploading, updating, or removing a specification causes zero changes to an API's declared resources or its routing behaviour, verified by comparing the API's resources and any active deployment before and after each operation.
+- **SC-008**: For any API whose specification and declared resources disagree, a producer can see exactly which paths and methods differ without comparing the two documents by hand.
 
 ## Assumptions
 
 - The feature targets REST APIs managed by the Platform API. Other API kinds (MCP proxies, LLM proxies, event APIs) are out of scope for this feature.
+- The specification is documentation-facing only. The API's declared REST resources remain the sole input to gateway routing, so no upload can change how traffic is routed. Making the specification the source of truth for resources (synchronising or replacing them on upload) is deliberately deferred to a later feature; this one only makes the disagreement visible.
+- Creating a REST API by importing a specification, and importing a specification from a URL, are deliberately excluded. Because the platform never fetches a caller-supplied location, this feature introduces no outbound-request surface.
 - OpenAPI 3.0 and 3.1 documents are in scope. Swagger/OpenAPI 2.0 documents and WSDL/SOAP definitions are out of scope for this feature; if support is later needed it is a separate feature.
 - Exactly one current specification is stored per REST API. Version history / rollback of specifications is out of scope for this feature; the platform retains only the current document plus its last-changed metadata.
 - Callers are already authenticated by the platform's existing mechanism, and organization and project membership are already established. This feature adds authorization rules for the new operations but introduces no new authentication mechanism.

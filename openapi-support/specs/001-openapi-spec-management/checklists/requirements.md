@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,7 +31,7 @@
 
 ## Notes
 
-- 2 [NEEDS CLARIFICATION] markers remain, both scope-defining and awaiting user decision:
-  - **FR-013** — whether an uploaded specification becomes the source of truth for the API's resources/operations (affecting gateway routing) or is documentation-only.
-  - **FR-014** — whether a REST API can be created directly by importing a specification (and/or by URL), or only attached to an already-created API.
-- All other items pass. Once the two questions are answered and folded into the spec, this checklist is complete and the feature is ready for `/speckit.plan`.
+- All items pass. Both open questions were resolved on 2026-09-01 and folded into the spec:
+  - **FR-013 / FR-014** — the specification is stored independently of the API's declared REST resources and never changes routing; where the two disagree, the platform surfaces the drift (paths and methods differing in either direction) without altering either side. Making the specification the source of truth for resources is deferred to a later feature.
+  - **FR-015** — create-by-import is out of scope. A specification can only be attached to an API that already exists, and the platform never fetches a caller-supplied URL, so this feature adds no outbound-request surface.
+- Ready for `/speckit.plan`.
