@@ -6,8 +6,8 @@ Applies to every `kb/**/*.md` whose YAML frontmatter carries a `sources:` list (
 
 ## Directives
 
-1. **Check before editing.** Before changing a Go, SQL, YAML or config file, run `grep -rl "resource: /<path>" kb`. If a feature doc lists the file, re-read its Use cases, Decisions, Scope, Current limitations and Entry points sections and update whatever the change invalidates, in the same PR.
-2. **New surface goes in `sources:`.** A new handler, service, repository, table, config key or endpoint belonging to a documented feature is added to that doc's `sources:` list and its Entry points table.
+1. **Check before editing.** Before changing a Go, SQL, YAML or config file, run `grep -rlE "resource: /(<path>|<parent-dir>/)$" kb`, or simply `grep -rl "resource: /<parent-dir>" kb`. If a feature doc lists the file, re-read its Use cases, Decisions, Scope, Current limitations and Entry points sections and update whatever the change invalidates, in the same PR.
+2. **New surface goes in `sources:`.** A new file or directory owned by a documented feature is added to that doc's `sources:` list and its Entry points table, unless a directory entry already covers it. Shared files, tests and generated code are not added.
 3. **Decisions and limitations are rows, not prose.** A product decision taken in a PR becomes a Decisions row citing the PR. A limitation that is fixed has its row deleted. Never leave a stale row.
 4. **`verified[].at` means verified.** Bump it only after actually comparing the doc against the code. Bump `stale_after` at the same time.
 5. **No deferring behind a comment or label.** Never ship `<!-- TODO: update docs -->`. If the change genuinely does not affect the doc, add the `docs-not-affected` label to the PR with a one-line reason.

@@ -29,13 +29,24 @@ These override anything the OKF skill or the template example suggests.
 3. **Two audiences, one file.** The body is a shared header, then a Product view, then a Developer view. Nothing in the Product view names a file. Nothing in the Developer view re-explains a use case. Decisions are written in user terms ("uploading never changes how traffic is routed"), not implementation terms.
 4. **Decisions versus open questions.** A choice that was made goes in Decisions with its reason. A choice not yet made goes in Open questions with options, owner and needed-by. When a question is answered, move it.
 5. **Limitations are rows with tracking.** Each row links an issue or says "Not yet filed". Delete the row when fixed. Never leave a stale row.
-6. **Every Entry points path is in `sources`, and the reverse.** The `sources` list is what `scripts/check-feature-docs.sh` uses to fail a PR that changes documented code without updating the document. Planned files that do not exist yet are allowed and are reported as warnings.
+6. **`sources` lists what the feature owns.** `scripts/check-feature-docs.sh` fails a PR that changes a listed path without updating the document, so every entry must be a file or directory whose change would plausibly invalidate the document. Include:
+   - files and directories created for the feature;
+   - a shared file only when it implements a behaviour stated in Decisions (for example, the file that holds the resolution order or the fixed error body).
+
+   Leave out:
+   - shared files the feature only wires into (`main.go`, storage interfaces, event dispatch, xDS snapshot, config templates, Helm values);
+   - tests, except the one end-to-end feature file that serves as the executable specification;
+   - generated code (list the contract it is generated from instead);
+   - extra SQL dialect files (list the SQLite schema file only; the dialects change together).
+
+   Prefer one directory entry (trailing `/`) over listing every file in a feature-owned package. Every `sources` entry appears in Entry points. Entry points may also show shared files for orientation; mark those rows "(shared, not tracked)". Planned paths that do not exist yet are allowed and are reported as warnings.
 7. **Minimal.** One sentence per idea. No history, no dates in the body, no planning narrative, no session notes, no branch names. No marketing words.
 8. **Preserve what exists.** When updating a document, change only what the code or decision change invalidates. Do not restructure or re-flow unrelated sections.
 
 ## Checklist before finishing
 
 - Frontmatter has `type`, `title`, `description`, `resource`, `status`, `sources`.
+- `sources` has no tests other than the end-to-end feature file, no generated code, one SQL schema file, and no shared file unless Decisions depends on it.
 - `grep -nE "specs/|\.specify|artifacts/|spec\.md|plan\.md|research\.md|tasks\.md|data-model\.md|quickstart\.md"` on the file returns nothing.
 - No function, method, struct or test name appears anywhere in the file.
 - Section list is exactly: Use cases, Decisions, Scope, Current limitations, Open questions, Entry points, Examples.

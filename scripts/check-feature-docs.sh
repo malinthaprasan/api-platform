@@ -15,7 +15,11 @@ while IFS= read -r doc; do
   hit=""
   for s in $srcs; do
     [ -e "$s" ] || echo "::warning file=$doc::source path does not exist: $s"
-    grep -qx "$s" <<<"$changed" && hit="$hit $s"
+    if [[ "$s" == */ ]]; then
+      grep -q "^${s}" <<<"$changed" && hit="$hit $s"
+    else
+      grep -qx "$s" <<<"$changed" && hit="$hit $s"
+    fi
   done
   if [ -n "$hit" ] && ! grep -qx "$doc" <<<"$changed"; then
     if [ "${DOCS_NOT_AFFECTED:-0}" = "1" ]; then

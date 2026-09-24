@@ -9,7 +9,8 @@ sources:
   - id: <short-id>
     resource: /<component>/<path-to-file>
     title: <What this file is>
-  # One entry per file named in Entry points. Files only, never functions.
+  # Files or directories (trailing /) this feature owns. Never functions.
+  # No tests except the end-to-end feature file, no generated code, one SQL schema file.
 ---
 
 # <Feature name>
@@ -70,7 +71,7 @@ Out of scope:
 
 ### Entry points
 
-Ordered the way a reader should explore. Every path also appears in `sources` so the sync check covers it.
+Ordered the way a reader should explore. Every `sources` entry appears here. Rows marked "(shared, not tracked)" are for orientation only and are not in `sources`.
 
 | Start here | Path | What you will find |
 |---|---|---|
